@@ -90,17 +90,11 @@ func onAWS(cf *CLIConf) error {
 		}
 	}()
 
-	addr, err := utils.ParseAddr(lp.GetAddr())
+	endpointURL, err := getLocalAWSEndpointURL(lp.GetAddr())
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	url := url.URL{
-		Path:   "/",
-		Host:   fmt.Sprintf("%s:%d", "localhost", addr.Port(0)),
-		Scheme: "https",
-	}
-
-	endpointFlag := fmt.Sprintf("--endpoint-url=%s", url.String())
+	endpointFlag := fmt.Sprintf("--endpoint-url=%s", endpointURL)
 	bundleFlag := fmt.Sprintf("--ca-bundle=%s", tmpCert.getCAPath())
 
 	args := append([]string{}, cf.AWSCommandArgs...)
@@ -117,15 +111,24 @@ func onAWS(cf *CLIConf) error {
 	return nil
 }
 
-// genAndSetAWSCredentials generates and returns fake AWS credential that are used
-// for signing an AWS request during aws CLI call and verified on local AWS proxy side.
+// genAWSCredentials generates and returns fake AWS credential that are used
+// for signing an AWS request during aws CLI call and verified on local AWS
+// proxy side.
+func genAWSCredentials() (generatedAWSCred *credentials.Credentials, id string, secret string) {
+	id = uuid.New().String()
+	secret = uuid.New().String()
+	generatedAWSCred = credentials.NewStaticCredentials(id, secret, "")
+	return
+}
+
+// genAndSetAWSCredentials generates fake AWS credential and configures the
+// generated credentials through environment variables for AWS CLI.
 func genAndSetAWSCredentials() (*credentials.Credentials, error) {
-	id := uuid.New().String()
-	secret := uuid.New().String()
+	generatedAWSCred, id, secret := genAWSCredentials()
 	if err := setFakeAWSEnvCredentials(id, secret); err != nil {
 		return nil, trace.Wrap(err)
 	}
-	return credentials.NewStaticCredentials(id, secret, ""), nil
+	return generatedAWSCred, nil
 }
 
 func createLocalAWSCLIProxy(cf *CLIConf, tc *client.TeleportClient, cred *credentials.Credentials, localCerts tls.Certificate) (*alpnproxy.LocalProxy, error) {
@@ -143,7 +146,12 @@ func createLocalAWSCLIProxy(cf *CLIConf, tc *client.TeleportClient, cred *creden
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	listener, err := tls.Listen("tcp", "localhost:0", &tls.Config{
+
+	localAddr := "localhost:0"
+	if cf.LocalProxyPort != "" {
+		localAddr = fmt.Sprintf("127.0.0.1:%s", cf.LocalProxyPort)
+	}
+	listener, err := tls.Listen("tcp", localAddr, &tls.Config{
 		Certificates: []tls.Certificate{
 			localCerts,
 		},
@@ -379,4 +387,17 @@ func getAWSAppsName(apps []tlsca.RouteToApp) []string {
 		}
 	}
 	return out
+}
+
+func getLocalAWSEndpointURL(address string) (string, error) {
+	addr, err := utils.ParseAddr(address)
+	if err != nil {
+		return "", trace.Wrap(err)
+	}
+	url := url.URL{
+		Path:   "/",
+		Host:   fmt.Sprintf("%s:%d", "localhost", addr.Port(0)),
+		Scheme: "https",
+	}
+	return url.String(), nil
 }

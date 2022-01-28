@@ -193,6 +193,60 @@ func onProxyCommandDB(cf *CLIConf) error {
 	return nil
 }
 
+func onProxyCommandAWS(cf *CLIConf) error {
+	// create self-signed local cert AWS LocalProxy listener cert
+	// and pass CA to AWS CLI by --ca-bundle flag to enforce HTTPS
+	// protocol communication between AWS CLI <-> LocalProxy internal.
+	tmpCert, err := newTempSelfSignedLocalCert()
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	defer func() {
+		if err := tmpCert.Clean(); err != nil {
+			log.WithError(err).Errorf(
+				"Failed to clean temporary self-signed local proxy cert %q.", tmpCert.getCAPath())
+		}
+	}()
+
+	generatedAWSCred, accessKeyID, secretAccessKey := genAWSCredentials()
+
+	tc, err := makeClient(cf, false)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	lp, err := createLocalAWSCLIProxy(cf, tc, generatedAWSCred, tmpCert.getCert())
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	go func() {
+		<-cf.Context.Done()
+		lp.Close()
+	}()
+
+	endpointURL, err := getLocalAWSEndpointURL(lp.GetAddr())
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	err = awsProxyTemplate.Execute(os.Stdout, map[string]string{
+		"accessKeyID":     accessKeyID,
+		"secretAccessKey": secretAccessKey,
+		"caPath":          tmpCert.getCAPath(),
+		"address":         lp.GetAddr(),
+		"endpointURL":     endpointURL,
+	})
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	defer lp.Close()
+	if err := lp.StartAWSAccessProxy(cf.Context); err != nil {
+		return trace.Wrap(err)
+	}
+	return nil
+}
+
 func mkLocalProxy(cf *CLIConf, remoteProxyAddr string, protocol string, listener net.Listener) (*alpnproxy.LocalProxy, error) {
 	alpnProtocol, err := toALPNProtocol(protocol)
 	if err != nil {
@@ -229,11 +283,27 @@ func toALPNProtocol(dbProtocol string) (alpncommon.Protocol, error) {
 	}
 }
 
-// dbProxyTpl is the message that gets printed to a user when a database proxy is started.
-var dbProxyTpl = template.Must(template.New("").Parse(`Started DB proxy on {{.address}}
+var (
+	// dbProxyTpl is the message that gets printed to a user when a database proxy is started.
+	dbProxyTpl = template.Must(template.New("").Parse(`Started DB proxy on {{.address}}
 
-Use following credentials to connect to the {{.database}} proxy:
+Use the following credentials to connect to the {{.database}} proxy:
   ca_file={{.ca}}
   cert_file={{.cert}}
   key_file={{.key}}
 `))
+
+	// awsProxyTemplate is the message that gets printed to a user when an AWS
+	// proxy is started.
+	awsProxyTemplate = template.Must(template.New("").Parse(`Started AWS proxy on {{.address}}
+
+Use the following credentials to connect to the proxy:
+  AWS_ACCESS_KEY_ID={{.accessKeyID}}
+  AWS_SECRET_ACCESS_KEY={{.secretAccessKey}}
+  AWS_CA_BUNDLE={{.caPath}}
+
+In addition, please use "{{.endpointURL}}" as the endpoint URL in your AWS
+clients. For example, use "--endpoint-url={{.endpointURL}}" for AWS CLI
+commands.
+`))
+)

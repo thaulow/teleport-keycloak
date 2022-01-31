@@ -20,6 +20,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"strconv"
@@ -193,55 +194,44 @@ func onProxyCommandDB(cf *CLIConf) error {
 	return nil
 }
 
+// onProxyCommandAWS creates a local AWS proxy.
 func onProxyCommandAWS(cf *CLIConf) error {
-	// create self-signed local cert AWS LocalProxy listener cert
-	// and pass CA to AWS CLI by --ca-bundle flag to enforce HTTPS
-	// protocol communication between AWS CLI <-> LocalProxy internal.
-	tmpCert, err := newTempSelfSignedLocalCert()
-	if err != nil {
-		return trace.Wrap(err)
-	}
-	defer func() {
-		if err := tmpCert.Clean(); err != nil {
-			log.WithError(err).Errorf(
-				"Failed to clean temporary self-signed local proxy cert %q.", tmpCert.getCAPath())
-		}
-	}()
-
-	generatedAWSCred, accessKeyID, secretAccessKey := genAWSCredentials()
-
 	tc, err := makeClient(cf, false)
 	if err != nil {
 		return trace.Wrap(err)
 	}
 
-	lp, err := createLocalAWSCLIProxy(cf, tc, generatedAWSCred, tmpCert.getCert())
+	tempAWSCred, err := newTempAWSCredentials()
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	defer tempAWSCred.cleanup()
+
+	if err = tempAWSCred.createSharedCredentialsFile(); err != nil {
+		return trace.Wrap(err)
+	}
+
+	localProxy, err := createLocalAWSCLIProxy(cf, tc, tempAWSCred.get(), tempAWSCred.getCert())
 	if err != nil {
 		return trace.Wrap(err)
 	}
 	go func() {
 		<-cf.Context.Done()
-		lp.Close()
+		localProxy.Close()
 	}()
 
-	endpointURL, err := getLocalAWSEndpointURL(lp.GetAddr())
+	endpointURL := url.URL{Scheme: "https", Host: localProxy.GetAddr()}
+	templateData := tempAWSCred.genEnvironmentVariables()
+	templateData["credentialsFile"] = tempAWSCred.getSharedCredentialsFilePath()
+	templateData["address"] = localProxy.GetAddr()
+	templateData["endpointURL"] = endpointURL.String()
+	err = awsProxyTemplate.Execute(os.Stdout, templateData)
 	if err != nil {
 		return trace.Wrap(err)
 	}
 
-	err = awsProxyTemplate.Execute(os.Stdout, map[string]string{
-		"accessKeyID":     accessKeyID,
-		"secretAccessKey": secretAccessKey,
-		"caPath":          tmpCert.getCAPath(),
-		"address":         lp.GetAddr(),
-		"endpointURL":     endpointURL,
-	})
-	if err != nil {
-		return trace.Wrap(err)
-	}
-
-	defer lp.Close()
-	if err := lp.StartAWSAccessProxy(cf.Context); err != nil {
+	defer localProxy.Close()
+	if err := localProxy.StartAWSAccessProxy(cf.Context); err != nil {
 		return trace.Wrap(err)
 	}
 	return nil
@@ -297,13 +287,19 @@ Use the following credentials to connect to the {{.database}} proxy:
 	// proxy is started.
 	awsProxyTemplate = template.Must(template.New("").Parse(`Started AWS proxy on {{.address}}
 
-Use the following credentials to connect to the proxy:
-  AWS_ACCESS_KEY_ID={{.accessKeyID}}
-  AWS_SECRET_ACCESS_KEY={{.secretAccessKey}}
-  AWS_CA_BUNDLE={{.caPath}}
+Use the following AWS credentials file to connect to the proxy:
+  AWS_SHARED_CREDENTIALS_FILE={{.credentialsFile}}
 
-In addition, please use "{{.endpointURL}}" as the endpoint URL in your AWS
-clients. For example, use "--endpoint-url={{.endpointURL}}" for AWS CLI
-commands.
+Alternatively, use the following credentials to connect to the proxy:
+  AWS_ACCESS_KEY_ID={{.AWS_ACCESS_KEY_ID}}
+  AWS_SECRET_ACCESS_KEY={{.AWS_SECRET_ACCESS_KEY}}
+  AWS_CA_BUNDLE={{.AWS_CA_BUNDLE}}
+
+In addition to the credentials, please use "{{.endpointURL}}" as the endpoint
+URL(s) in your AWS client applications.
+
+For example, to get caller identity with AWS CLI:
+  AWS_SHARED_CREDENTIALS_FILE={{.credentialsFile}} aws sts get-caller-identity --endpoint-url={{.endpointURL}}
+
 `))
 )

@@ -26,6 +26,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"math/big"
+	"net"
 	"time"
 
 	"github.com/gravitational/trace"
@@ -33,6 +34,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/gravitational/teleport/api/constants"
+	"github.com/gravitational/teleport/lib/defaults"
 	"github.com/gravitational/teleport/lib/utils"
 )
 
@@ -58,11 +60,12 @@ func GenerateSelfSignedCAWithSigner(signer crypto.Signer, entity pkix.Name, dnsN
 // GenerateCAConfig defines the configuration for generating
 // self-signed CA certificates
 type GenerateCAConfig struct {
-	Signer   crypto.Signer
-	Entity   pkix.Name
-	DNSNames []string
-	TTL      time.Duration
-	Clock    clockwork.Clock
+	Signer      crypto.Signer
+	Entity      pkix.Name
+	DNSNames    []string
+	IPAddresses []net.IP
+	TTL         time.Duration
+	Clock       clockwork.Clock
 }
 
 // setDefaults imposes defaults on this configuration
@@ -101,6 +104,7 @@ func GenerateSelfSignedCAWithConfig(config GenerateCAConfig) (certPEM []byte, er
 		BasicConstraintsValid: true,
 		IsCA:                  true,
 		DNSNames:              config.DNSNames,
+		IPAddresses:           config.IPAddresses,
 	}
 
 	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, config.Signer.Public(), config.Signer)
@@ -120,6 +124,30 @@ func GenerateSelfSignedCA(entity pkix.Name, dnsNames []string, ttl time.Duration
 		return nil, nil, trace.Wrap(err)
 	}
 	certPEM, err := GenerateSelfSignedCAWithSigner(priv, entity, dnsNames, ttl)
+	return keyPEM, certPEM, err
+}
+
+// GenerateSelfSignedCAForLocalhost generates self-signed certificate authority
+// with 127.0.0.1 as an IP address in SAN.
+func GenerateSelfSignedCAForLocalhost(entity pkix.Name, ttl time.Duration) ([]byte, []byte, error) {
+	priv, err := rsa.GenerateKey(rand.Reader, constants.RSAKeySize)
+	if err != nil {
+		return nil, nil, trace.Wrap(err)
+	}
+
+	if entity.CommonName == "" {
+		entity.CommonName = "localhost"
+	}
+
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)})
+	certPEM, err := GenerateSelfSignedCAWithConfig(GenerateCAConfig{
+		Signer:      priv,
+		Entity:      entity,
+		DNSNames:    []string{entity.CommonName},
+		IPAddresses: []net.IP{net.ParseIP(defaults.Localhost)},
+		TTL:         ttl,
+		Clock:       clockwork.NewRealClock(),
+	})
 	return keyPEM, certPEM, err
 }
 

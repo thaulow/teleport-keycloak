@@ -293,7 +293,8 @@ func (c *tempAWSCredentials) genEnvironmentVariables() map[string]string {
 	}
 }
 
-// setEnvironmentVariables set fake credentials through environment variables for AWS CLI.
+// setEnvironmentVariables sets fake credentials through environment variables
+// for AWS CLI.
 func (c *tempAWSCredentials) setEnvironmentVariables() error {
 	for key, value := range c.genEnvironmentVariables() {
 		if err := os.Setenv(key, value); err != nil {
@@ -303,7 +304,7 @@ func (c *tempAWSCredentials) setEnvironmentVariables() error {
 	return nil
 }
 
-// createSharedCredentialsFile create an AWS credentials file using generated
+// createSharedCredentialsFile creates an AWS credentials file using generated
 // credentials.
 func (c *tempAWSCredentials) createSharedCredentialsFile() error {
 	c.sharedCredentialsFilePath = path.Join(c.tempDir, "credentials")
@@ -313,7 +314,7 @@ func (c *tempAWSCredentials) createSharedCredentialsFile() error {
 	}
 	defer sharedCredentialsFile.Close()
 
-	if err = awsSharedCredentialsFileTemplate.Execute(sharedCredentialsFile, c.genEnvironmentVariables()); err != nil {
+	if err = awsCredentialsFileTemplate.Execute(sharedCredentialsFile, c.genEnvironmentVariables()); err != nil {
 		return trace.Wrap(err)
 	}
 	return nil
@@ -323,7 +324,7 @@ func (c *tempAWSCredentials) createSharedCredentialsFile() error {
 func (c *tempAWSCredentials) cleanup() {
 	log.Debugf("Removing temporary directory: %v.", c.tempDir)
 	if err := os.RemoveAll(c.tempDir); err != nil {
-		log.WithError(err).Errorf("Failed to clean temporary directory %q.", c.tempDir)
+		log.WithError(err).Errorf("Failed to remove temporary directory %q.", c.tempDir)
 	}
 }
 
@@ -435,7 +436,9 @@ func getAWSAppsName(apps []tlsca.RouteToApp) []string {
 	return out
 }
 
-var awsSharedCredentialsFileTemplate = template.Must(template.New("credentials").Parse(`[default]
+// awsCredentialsFileTemplate is the template used to generate AWS credentials
+// files.
+var awsCredentialsFileTemplate = template.Must(template.New("credentials").Parse(`[default]
 aws_access_key_id={{.AWS_ACCESS_KEY_ID}}
 aws_secret_access_key={{.AWS_SECRET_ACCESS_KEY}}
 ca_bundle={{.AWS_CA_BUNDLE}}

@@ -215,6 +215,8 @@ func onProxyCommandAWS(cf *CLIConf) error {
 	if err != nil {
 		return trace.Wrap(err)
 	}
+
+	defer localProxy.Close()
 	go func() {
 		<-cf.Context.Done()
 		localProxy.Close()
@@ -225,12 +227,9 @@ func onProxyCommandAWS(cf *CLIConf) error {
 	templateData["credentialsFile"] = tempAWSCred.getSharedCredentialsFilePath()
 	templateData["address"] = localProxy.GetAddr()
 	templateData["endpointURL"] = endpointURL.String()
-	err = awsProxyTemplate.Execute(os.Stdout, templateData)
-	if err != nil {
+	if err = awsProxyTemplate.Execute(os.Stdout, templateData); err != nil {
 		return trace.Wrap(err)
 	}
-
-	defer localProxy.Close()
 	if err := localProxy.StartAWSAccessProxy(cf.Context); err != nil {
 		return trace.Wrap(err)
 	}

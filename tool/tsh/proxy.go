@@ -286,10 +286,13 @@ Use the following credentials to connect to the {{.database}} proxy:
 	// proxy is started.
 	awsProxyTemplate = template.Must(template.New("").Parse(`Started AWS proxy on {{.address}}
 
-Use the following AWS credentials file to connect to the proxy:
+To connect to the proxy, set the following environment variable to use the
+credentials saved in this temporary AWS credentials file:
+
   AWS_SHARED_CREDENTIALS_FILE={{.credentialsFile}}
 
-Alternatively, use the following credentials to connect to the proxy:
+Alternatively, set the credentials directly using the following environment
+variables:
   AWS_ACCESS_KEY_ID={{.AWS_ACCESS_KEY_ID}}
   AWS_SECRET_ACCESS_KEY={{.AWS_SECRET_ACCESS_KEY}}
   AWS_CA_BUNDLE={{.AWS_CA_BUNDLE}}

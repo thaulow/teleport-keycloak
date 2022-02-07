@@ -17,26 +17,26 @@ limitations under the License.
 package main
 
 import (
+	"crypto/md5"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/hex"
 	"fmt"
-	"io/ioutil"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
-	"path"
 	"sort"
 	"strings"
-	"text/template"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/google/uuid"
 	"github.com/gravitational/trace"
+	"github.com/jonboulle/clockwork"
 
 	"github.com/gravitational/teleport/lib/asciitable"
 	"github.com/gravitational/teleport/lib/client"
+	awscred "github.com/gravitational/teleport/lib/client/aws"
 	"github.com/gravitational/teleport/lib/defaults"
 	"github.com/gravitational/teleport/lib/srv/alpnproxy"
 	alpncommon "github.com/gravitational/teleport/lib/srv/alpnproxy/common"
@@ -44,6 +44,7 @@ import (
 	"github.com/gravitational/teleport/lib/utils"
 
 	awsarn "github.com/aws/aws-sdk-go/aws/arn"
+	"github.com/aws/aws-sdk-go/aws/credentials"
 )
 
 const (
@@ -51,26 +52,26 @@ const (
 )
 
 func onAWS(cf *CLIConf) error {
-	tc, err := makeClient(cf, false)
+	profile, err := client.StatusCurrent(cf.HomePath, cf.Proxy)
 	if err != nil {
 		return trace.Wrap(err)
 	}
 
-	// Generate temporary AWS credentials and self-signed local cert.
-	tempAWSCred, err := newTempAWSCredentials()
+	awsApp, err := pickActiveAWSApp(cf, profile)
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	defer tempAWSCred.cleanup()
 
-	// AWS credentials need to be set through environment variables in order to
-	// enforce AWS CLI to sign the request and provide Authorization Header
-	// where service-name and region-name are encoded.
-	if err = tempAWSCred.setEnvironmentVariables(); err != nil {
+	credProvider, err := getAWSCredentialsProvider(profile, awsApp)
+	if err != nil {
 		return trace.Wrap(err)
 	}
 
-	lp, err := createLocalAWSCLIProxy(cf, tc, tempAWSCred.get(), tempAWSCred.getCert())
+	if err = credProvider.SetEnvironmentVariables(); err != nil {
+		return trace.Wrap(err)
+	}
+
+	lp, err := createLocalAWSCLIProxy(cf, profile, awsApp, credentials.NewCredentials(credProvider))
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -99,13 +100,18 @@ func onAWS(cf *CLIConf) error {
 	return nil
 }
 
-func createLocalAWSCLIProxy(cf *CLIConf, tc *client.TeleportClient, cred *credentials.Credentials, localCerts tls.Certificate) (*alpnproxy.LocalProxy, error) {
-	awsApp, err := pickActiveAWSApp(cf)
+func createLocalAWSCLIProxy(cf *CLIConf, profile *client.ProfileStatus, awsApp string, cred *credentials.Credentials) (*alpnproxy.LocalProxy, error) {
+	tc, err := makeClient(cf, false)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
-	appCerts, err := loadAWSAppCertificate(tc, awsApp)
+	appCerts, appX509Cert, err := loadAWSAppCertificate(tc, awsApp)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	cert, err := getSelfSignedLocalCert(profile, awsApp, appX509Cert)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -121,7 +127,7 @@ func createLocalAWSCLIProxy(cf *CLIConf, tc *client.TeleportClient, cred *creden
 	}
 	listener, err := tls.Listen("tcp", localAddr, &tls.Config{
 		Certificates: []tls.Certificate{
-			localCerts,
+			cert,
 		},
 	})
 	if err != nil {
@@ -147,32 +153,32 @@ func createLocalAWSCLIProxy(cf *CLIConf, tc *client.TeleportClient, cred *creden
 	return lp, nil
 }
 
-func loadAWSAppCertificate(tc *client.TeleportClient, appName string) (tls.Certificate, error) {
+func loadAWSAppCertificate(tc *client.TeleportClient, appName string) (tls.Certificate, *x509.Certificate, error) {
 	key, err := tc.LocalAgent().GetKey(tc.SiteName, client.WithAppCerts{})
 	if err != nil {
-		return tls.Certificate{}, trace.Wrap(err)
+		return tls.Certificate{}, nil, trace.Wrap(err)
 	}
 	cc, ok := key.AppTLSCerts[appName]
 	if !ok {
-		return tls.Certificate{}, trace.NotFound("please login into AWS Console App 'tsh app login' first")
+		return tls.Certificate{}, nil, trace.NotFound("please login into AWS Console App 'tsh app login' first")
 	}
 	cert, err := tls.X509KeyPair(cc, key.Priv)
 	if err != nil {
-		return tls.Certificate{}, trace.Wrap(err)
+		return tls.Certificate{}, nil, trace.Wrap(err)
 	}
 	if len(cert.Certificate) < 1 {
-		return tls.Certificate{}, trace.NotFound("invalid certificate length")
+		return tls.Certificate{}, nil, trace.NotFound("invalid certificate length")
 	}
 	x509cert, err := x509.ParseCertificate(cert.Certificate[0])
 	if err != nil {
-		return tls.Certificate{}, trace.Wrap(err)
+		return tls.Certificate{}, nil, trace.Wrap(err)
 	}
 	if time.Until(x509cert.NotAfter) < 5*time.Second {
-		return tls.Certificate{}, trace.BadParameter(
+		return tls.Certificate{}, nil, trace.BadParameter(
 			"AWS application %s certificate has expired, please re-login to the app using 'tsh app login'",
 			appName)
 	}
-	return cert, nil
+	return cert, x509cert, nil
 }
 
 func printArrayAs(arr []string, columnName string) {
@@ -240,150 +246,110 @@ func mapKeysToSlice(m map[string]string) []string {
 	return out
 }
 
-// tempAWSCredentials creates fake AWS credentials and self-signed CA certs
-// that are used for signing an AWS requests and verified on local AWS proxy
-// side.
-type tempAWSCredentials struct {
-	*tempSelfSignedLocalCert
+func getAWSCredentialsProvider(profile *client.ProfileStatus, awsAppName string) (*awscred.CredentialsFileProvider, error) {
+	credFilePath := profile.AWSCredentialsPath(awsAppName)
+	certPath := profile.AppLocalhostCAPath(awsAppName)
 
-	accessKeyID     string
-	secretAccessKey string
-	credentials     *credentials.Credentials
-
-	tempDir                   string
-	sharedCredentialsFilePath string
-}
-
-// newTempAWSCredentials creates a new tempAWSCredentials.
-func newTempAWSCredentials() (*tempAWSCredentials, error) {
-	tempDir, err := ioutil.TempDir("", "teleport*")
+	cred, err := awscred.LoadCredentialsFile(credFilePath, "")
 	if err != nil {
-		return nil, trace.ConvertSystemError(err)
+		log.WithError(err).Debugf("Failed to load AWS credentials file: %v.", credFilePath)
+		// Fallthrough to create new credentials file
+	} else if cred.CustomCABundePath != certPath {
+		log.Debugf("CA bundle paths do not match. Expected %v, but got %v.", certPath, cred.CustomCABundePath)
+		// Fallthrough to create new credentials file
+	} else {
+		return cred, nil
 	}
 
-	tempCert, err := newTempSelfSignedLocalCert(tempDir)
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-
-	accessKeyID := uuid.NewString()
-	secretAccessKey := uuid.NewString()
-	return &tempAWSCredentials{
-		tempSelfSignedLocalCert: tempCert,
-		tempDir:                 tempDir,
-		accessKeyID:             accessKeyID,
-		secretAccessKey:         secretAccessKey,
-		credentials:             credentials.NewStaticCredentials(accessKeyID, secretAccessKey, ""),
-	}, nil
-}
-
-// genEnvironmentVariables returns a map of environment variables using
-// generated credentials.
-func (c *tempAWSCredentials) genEnvironmentVariables() map[string]string {
-	// AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are used to generate the
-	// authorization header by AWS CLI or SDK, and the signature will be
-	// verified by the local proxy.
-	//
-	// AWS_CA_BUNDLE enforce HTTPS protocol communication between AWS clients
-	// and the local proxy.
-	return map[string]string{
-		"AWS_ACCESS_KEY_ID":     c.accessKeyID,
-		"AWS_SECRET_ACCESS_KEY": c.secretAccessKey,
-		"AWS_CA_BUNDLE":         c.getCAPath(),
-	}
-}
-
-// setEnvironmentVariables sets fake credentials through environment variables
-// for AWS CLI.
-func (c *tempAWSCredentials) setEnvironmentVariables() error {
-	for key, value := range c.genEnvironmentVariables() {
-		if err := os.Setenv(key, value); err != nil {
-			return trace.Wrap(err)
+	if utils.FileExists(certPath) {
+		if err := os.Remove(certPath); err != nil {
+			return nil, trace.ConvertSystemError(err)
 		}
 	}
-	return nil
+
+	hashData := fmt.Sprintf("%v-%v-%v", profile.Name, profile.Username, awsAppName)
+	hash := md5.Sum([]byte(hashData))
+	config := &awscred.CredentialsFileConfig{
+		AccessKeyID:       hashData,
+		SecretAccessKey:   hex.EncodeToString(hash[:]),
+		CustomCABundePath: certPath,
+	}
+	return awscred.SaveCredentialsFile(config, credFilePath)
 }
 
-// createSharedCredentialsFile creates an AWS credentials file using generated
-// credentials.
-func (c *tempAWSCredentials) createSharedCredentialsFile() error {
-	c.sharedCredentialsFilePath = path.Join(c.tempDir, "credentials")
-	sharedCredentialsFile, err := os.Create(c.sharedCredentialsFilePath)
+func getSelfSignedLocalCert(profile *client.ProfileStatus, appName string, appCert *x509.Certificate) (tls.Certificate, error) {
+	keyPath := profile.KeyPath()
+	certPath := profile.AppLocalhostCAPath(appName)
+
+	if utils.FileExists(certPath) {
+		cert, err := loadSelfSignedLocalCert(certPath, keyPath)
+		if err == nil {
+			return cert, nil
+		}
+
+		log.WithError(err).Debugf("Failed to load self signed certificates from %v", certPath)
+	}
+
+	return newSelfSignedLocalCert(certPath, keyPath, appCert.NotAfter)
+}
+
+func loadSelfSignedLocalCert(certPath, keyPath string) (tls.Certificate, error) {
+	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
 	if err != nil {
-		return trace.ConvertSystemError(err)
+		return tls.Certificate{}, trace.Wrap(err)
 	}
-	defer sharedCredentialsFile.Close()
 
-	if err = awsCredentialsFileTemplate.Execute(sharedCredentialsFile, c.genEnvironmentVariables()); err != nil {
-		return trace.Wrap(err)
+	if len(cert.Certificate) < 1 {
+		return tls.Certificate{}, trace.NotFound("invalid certificate length")
 	}
-	return nil
-}
 
-// cleanup removes generated files.
-func (c *tempAWSCredentials) cleanup() {
-	log.Debugf("Removing temporary directory: %v.", c.tempDir)
-	if err := os.RemoveAll(c.tempDir); err != nil {
-		log.WithError(err).Errorf("Failed to remove temporary directory %q.", c.tempDir)
-	}
-}
-
-// get returns generated AWS credentials
-func (c *tempAWSCredentials) get() *credentials.Credentials {
-	return c.credentials
-}
-
-// getSharedCredentialsFilePath returns the path to generated AWS shared
-// credentials file.
-func (c *tempAWSCredentials) getSharedCredentialsFilePath() string {
-	return c.sharedCredentialsFilePath
-}
-
-type tempSelfSignedLocalCert struct {
-	cert   tls.Certificate
-	caPath string
-}
-
-func newTempSelfSignedLocalCert(dir string) (*tempSelfSignedLocalCert, error) {
-	caKey, caCert, err := tlsca.GenerateSelfSignedCAForLocalhost(pkix.Name{
-		Organization: []string{"Teleport"},
-	}, defaults.CATTL)
+	x509cert, err := x509.ParseCertificate(cert.Certificate[0])
 	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-	cert, err := tls.X509KeyPair(caCert, caKey)
-	if err != nil {
-		return nil, trace.Wrap(err)
+		return tls.Certificate{}, trace.Wrap(err)
 	}
 
-	caFile, err := os.Create(path.Join(dir, "aws_local_proxy.pem"))
-	if err != nil {
-		return nil, trace.ConvertSystemError(err)
+	if err = utils.VerifyCertificateExpiry(x509cert, nil); err != nil {
+		return tls.Certificate{}, trace.Wrap(err)
 	}
-	defer caFile.Close()
-
-	if _, err = caFile.Write(caCert); err != nil {
-		return nil, trace.ConvertSystemError(err)
-	}
-	return &tempSelfSignedLocalCert{
-		cert:   cert,
-		caPath: caFile.Name(),
-	}, nil
+	return cert, nil
 }
 
-func (t *tempSelfSignedLocalCert) getCAPath() string {
-	return t.caPath
-}
-
-func (t *tempSelfSignedLocalCert) getCert() tls.Certificate {
-	return t.cert
-}
-
-func pickActiveAWSApp(cf *CLIConf) (string, error) {
-	profile, err := client.StatusCurrent(cf.HomePath, cf.Proxy)
+func newSelfSignedLocalCert(certPath, keyPath string, notAfter time.Time) (tls.Certificate, error) {
+	keyPem, err := utils.ReadPath(keyPath)
 	if err != nil {
-		return "", trace.Wrap(err)
+		return tls.Certificate{}, trace.Wrap(err)
 	}
+
+	key, err := utils.ParsePrivateKey(keyPem)
+	if err != nil {
+		return tls.Certificate{}, trace.Wrap(err)
+	}
+
+	certPem, err := tlsca.GenerateSelfSignedCAWithConfig(tlsca.GenerateCAConfig{
+		Entity: pkix.Name{
+			CommonName:   "localhost",
+			Organization: []string{"Teleport"},
+		},
+		Signer:      key,
+		DNSNames:    []string{"localhost"},
+		IPAddresses: []net.IP{net.ParseIP(defaults.Localhost)},
+		TTL:         notAfter.Sub(time.Now()),
+		Clock:       clockwork.NewRealClock(),
+	})
+
+	cert, err := tls.X509KeyPair(certPem, keyPem)
+	if err != nil {
+		return tls.Certificate{}, trace.Wrap(err)
+	}
+
+	// WriteFile truncates existing file before writing.
+	if err = os.WriteFile(certPath, certPem, 0600); err != nil {
+		return tls.Certificate{}, trace.ConvertSystemError(err)
+	}
+	return cert, nil
+}
+
+func pickActiveAWSApp(cf *CLIConf, profile *client.ProfileStatus) (string, error) {
 	if len(profile.Apps) == 0 {
 		return "", trace.NotFound("Please login to AWS app using 'tsh app login' first")
 	}
@@ -435,11 +401,3 @@ func getAWSAppsName(apps []tlsca.RouteToApp) []string {
 	}
 	return out
 }
-
-// awsCredentialsFileTemplate is the template used to generate AWS credentials
-// files.
-var awsCredentialsFileTemplate = template.Must(template.New("credentials").Parse(`[default]
-aws_access_key_id={{.AWS_ACCESS_KEY_ID}}
-aws_secret_access_key={{.AWS_SECRET_ACCESS_KEY}}
-ca_bundle={{.AWS_CA_BUNDLE}}
-`))

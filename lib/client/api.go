@@ -451,6 +451,22 @@ func (p *ProfileStatus) AppCertPath(name string) string {
 
 }
 
+// AppLocalhostCAPath returns the specified app's self-signed localhost CA path
+// for this profile.
+//
+// It's kept in <profile-dir>/keys/<proxy>/<user>-app/<cluster>/<name>-localhost-ca.pem
+func (p *ProfileStatus) AppLocalhostCAPath(name string) string {
+	return keypaths.AppLocalhostCAPath(p.Dir, p.Name, p.Username, p.Cluster, name)
+}
+
+// AWSCredentialsPath returns the specified app's AWS credentials file path for
+// this profile.
+//
+// It's kept in <profile-dir>/keys/<proxy>/<user>-app/<cluster>/<name>-localhost-ca.pem
+func (p *ProfileStatus) AWSCredentialsPath(name string) string {
+	return keypaths.AWSCredentialsPath(p.Dir, p.Name, p.Username, p.Cluster, name)
+}
+
 // KubeConfigPath returns path to the specified kubeconfig for this profile.
 //
 // It's kept in <profile-dir>/keys/<proxy>/<user>-kube/<cluster>/<name>-kubeconfig

@@ -27,10 +27,12 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/gravitational/trace"
 
 	"github.com/gravitational/teleport/api/profile"
 	"github.com/gravitational/teleport/api/utils/keypaths"
+	"github.com/gravitational/teleport/lib/client"
 	libclient "github.com/gravitational/teleport/lib/client"
 	"github.com/gravitational/teleport/lib/defaults"
 	"github.com/gravitational/teleport/lib/srv/alpnproxy"
@@ -196,22 +198,22 @@ func onProxyCommandDB(cf *CLIConf) error {
 
 // onProxyCommandAWS creates a local AWS proxy.
 func onProxyCommandAWS(cf *CLIConf) error {
-	tc, err := makeClient(cf, false)
+	profile, err := client.StatusCurrent(cf.HomePath, cf.Proxy)
 	if err != nil {
 		return trace.Wrap(err)
 	}
 
-	tempAWSCred, err := newTempAWSCredentials()
+	awsApp, err := pickActiveAWSApp(cf, profile)
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	defer tempAWSCred.cleanup()
 
-	if err = tempAWSCred.createSharedCredentialsFile(); err != nil {
+	credProvider, err := getAWSCredentialsProvider(profile, awsApp)
+	if err != nil {
 		return trace.Wrap(err)
 	}
 
-	localProxy, err := createLocalAWSCLIProxy(cf, tc, tempAWSCred.get(), tempAWSCred.getCert())
+	localProxy, err := createLocalAWSCLIProxy(cf, profile, awsApp, credentials.NewCredentials(credProvider))
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -223,8 +225,8 @@ func onProxyCommandAWS(cf *CLIConf) error {
 	}()
 
 	endpointURL := url.URL{Scheme: "https", Host: localProxy.GetAddr()}
-	templateData := tempAWSCred.genEnvironmentVariables()
-	templateData["credentialsFile"] = tempAWSCred.getSharedCredentialsFilePath()
+	templateData := credProvider.GetEnvironmentVariables()
+	templateData["credentialsFile"] = profile.AWSCredentialsPath(awsApp)
 	templateData["address"] = localProxy.GetAddr()
 	templateData["endpointURL"] = endpointURL.String()
 	if err = awsProxyTemplate.Execute(os.Stdout, templateData); err != nil {

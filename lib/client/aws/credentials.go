@@ -20,7 +20,6 @@ import (
 	"os"
 	"sync"
 
-	"github.com/gravitational/teleport/api/utils/tlsutils"
 	"github.com/gravitational/teleport/lib/utils"
 	"github.com/gravitational/trace"
 
@@ -29,7 +28,9 @@ import (
 	"gopkg.in/ini.v1"
 )
 
-type CredentialsFileConfig struct {
+// CredentialsConfig is the configuration for Teleport's custom AWS credentials
+// providers.
+type CredentialsConfig struct {
 	// Profile is the profile name
 	Profile string
 
@@ -41,12 +42,19 @@ type CredentialsFileConfig struct {
 
 	// CustomCABundePath is the path to a custom CA bundle.
 	CustomCABundePath string
+
+	// Setenv is a function that used to override os.Setenv in tests.
+	Setenv func(string, string) error
 }
 
 // CheckAndSetDefaults validates the config and sets defaults.
-func (c *CredentialsFileConfig) CheckAndSetDefaults() error {
+func (c *CredentialsConfig) CheckAndSetDefaults() error {
 	if c.Profile == "" {
 		c.Profile = defaultProfile
+	}
+
+	if c.Setenv == nil {
+		c.Setenv = os.Setenv
 	}
 
 	if c.AccessKeyID == "" {
@@ -61,14 +69,40 @@ func (c *CredentialsFileConfig) CheckAndSetDefaults() error {
 	return nil
 }
 
+// CredentialsFileProvider is a custom AWS credentials provider that provides
+// credentials through a shared credentials file.
+//
+// One use case of these credentials files is to authenticate AWS clients
+// against a local AWS proxy hosted by "tsh". Each credentials file contains a
+// AWS profile with a few settings that are supported by most AWS clients and
+// SDKs. The "aws_access_key_id" and "aws_secret_access_key" settings are used
+// by our proxies to verify the Authorization header signed by SigV4. The
+// "ca_bundle" setting specifies a CA bundle that can be used against our
+// proxies through TLS connections. The credentials file can usually be loaded
+// by AWS clients by specifying environment variable
+// "AWS_SHARED_CREDENTIALS_FILE".
+//
+// https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-files.html#cli-configure-files-settings
+// https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-envvars.html
+// https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-auth-using-authorization-header.html
 type CredentialsFileProvider struct {
-	*CredentialsFileConfig
+	*CredentialsConfig
 
-	readCertOnce sync.Once
-	expired      bool
+	// readCAOnce is an sync.Once object used to avoid reading CA bundle
+	// multiple times.
+	readCAOnce sync.Once
+
+	// isExpired is the expiration state of the credentials.
+	isExpired bool
 }
 
+// LoadCredentialsFile returns our credentials provider by parsing an existing
+// credentials file.
 func LoadCredentialsFile(path string, profile string) (*CredentialsFileProvider, error) {
+	// Currently, "aws-sdk-go" does not expose functions that parse the entire
+	// shared config files. "aws-sdk-go-v2" does not support "ca_bundle" for
+	// config.SharedConfig. Use "ini" lib to parse until it is supported in AWS
+	// SDK.
 	iniFile, err := ini.Load(path)
 	if err != nil {
 		return nil, trace.ConvertSystemError(err)
@@ -83,7 +117,7 @@ func LoadCredentialsFile(path string, profile string) (*CredentialsFileProvider,
 		return nil, trace.NotFound("profile %v not found in credentials file %v", profile, path)
 	}
 
-	config := &CredentialsFileConfig{
+	config := &CredentialsConfig{
 		Profile: profile,
 	}
 	for keyName, target := range map[string]*string{
@@ -104,15 +138,18 @@ func LoadCredentialsFile(path string, profile string) (*CredentialsFileProvider,
 	}
 
 	return &CredentialsFileProvider{
-		CredentialsFileConfig: config,
+		CredentialsConfig: config,
 	}, nil
 }
 
-func SaveCredentialsFile(config *CredentialsFileConfig, path string) (*CredentialsFileProvider, error) {
+// SaveCredentialsFile saves the specified credentials in the specified path
+// and returns our credentials provider.
+func SaveCredentialsFile(config *CredentialsConfig, path string) (*CredentialsFileProvider, error) {
 	if err := config.CheckAndSetDefaults(); err != nil {
 		return nil, trace.Wrap(err)
 	}
 
+	// LooseLoad will ignore file not found error.
 	iniFile, err := ini.LooseLoad(path)
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -143,12 +180,12 @@ func SaveCredentialsFile(config *CredentialsFileConfig, path string) (*Credentia
 	}
 
 	return &CredentialsFileProvider{
-		CredentialsFileConfig: config,
+		CredentialsConfig: config,
 	}, nil
 }
 
 // Retrieve returns credentials values. This function implements
-// credentials.Provider of AWS SDK.
+// credentials.Provider of aws-sdk-go.
 func (p *CredentialsFileProvider) Retrieve() (credentials.Value, error) {
 	return credentials.Value{
 		AccessKeyID:     p.AccessKeyID,
@@ -159,10 +196,10 @@ func (p *CredentialsFileProvider) Retrieve() (credentials.Value, error) {
 }
 
 // IsExpired checks if credentials are expired. This function implements
-// credentials.Provider of AWS SDK.
+// credentials.Provider of aws-sdk-go.
 func (p *CredentialsFileProvider) IsExpired() bool {
-	p.readCertOnce.Do(func() {
-		p.expired = true
+	p.readCAOnce.Do(func() {
+		p.isExpired = true
 
 		certsBytes, err := utils.ReadPath(p.CustomCABundePath)
 		if err != nil {
@@ -170,22 +207,25 @@ func (p *CredentialsFileProvider) IsExpired() bool {
 			return
 		}
 
-		cert, err := tlsutils.ParseCertificatePEM(certsBytes)
+		certs, err := utils.ReadCertificates(certsBytes)
 		if err != nil {
 			log.WithError(err).Warnf("Failed to parse certificates from CA file %v.", p.CustomCABundePath)
 			return
 		}
 
-		if err = utils.VerifyCertificateExpiry(cert, nil); err == nil {
-			p.expired = false
-			return
+		// Set expired to false if any cert is not expired.
+		for _, cert := range certs {
+			if err = utils.VerifyCertificateExpiry(cert, nil); err == nil {
+				p.isExpired = false
+				return
+			}
 		}
 	})
-	return p.expired
+	return p.isExpired
 }
 
-// GetEnvironmentVariables returns a map of environment variables using
-// generated credentials.
+// GetEnvironmentVariables returns a map of environment variables that can be
+// used to configure the same settings saved in the credentials file.
 func (p *CredentialsFileProvider) GetEnvironmentVariables() map[string]string {
 	return map[string]string{
 		envVarAccessKeyID:     p.AccessKeyID,
@@ -198,7 +238,7 @@ func (p *CredentialsFileProvider) GetEnvironmentVariables() map[string]string {
 // AWS clients.
 func (p *CredentialsFileProvider) SetEnvironmentVariables() error {
 	for key, value := range p.GetEnvironmentVariables() {
-		if err := os.Setenv(key, value); err != nil {
+		if err := p.Setenv(key, value); err != nil {
 			return trace.Wrap(err)
 		}
 	}
@@ -206,17 +246,29 @@ func (p *CredentialsFileProvider) SetEnvironmentVariables() error {
 }
 
 const (
+	// ProviderName is the name of our custom credentials provider.
 	ProviderName = "teleport"
 )
 
 const (
+	// defaultProfile is the default profile name used in the credentials file.
 	defaultProfile = "default"
 
-	sectionKeyAccessKeyID     = "aws_access_key_id"
+	// sectionKeyAccessKeyID is the section key for the AWS access key.
+	sectionKeyAccessKeyID = "aws_access_key_id"
+	// sectionKeySecretAccessKey is the section key for the secret key
+	// associated with the access key.
 	sectionKeySecretAccessKey = "aws_secret_access_key"
-	sectionKeyCABundle        = "ca_bundle"
+	// sectionKeyCABundle is the section key for the custom CA bundle path.
+	sectionKeyCABundle = "ca_bundle"
 
-	envVarAccessKeyID     = "AWS_ACCESS_KEY_ID"
+	// envVarAccessKeyID is the environment variable name for the AWS access
+	// key.
+	envVarAccessKeyID = "AWS_ACCESS_KEY_ID"
+	// envVarSecretAccessKey is the environment variable name for the secret
+	// key associated with the access key.
 	envVarSecretAccessKey = "AWS_SECRET_ACCESS_KEY"
-	envVarCABundle        = "AWS_CA_BUNDLE"
+	// envVarCABundle is the environment variable name for the custom CA bundle
+	// path.
+	envVarCABundle = "AWS_CA_BUNDLE"
 )

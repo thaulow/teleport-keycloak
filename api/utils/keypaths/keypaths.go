@@ -70,7 +70,7 @@ const (
 //    │   │   ├── root                      --> Database access certs for cluster "root"
 //    │   │   │   ├── appA-x509.pem         --> TLS cert for app service "appA"
 //    │   │   │   └── appB-credentials      --> AWS credentials file for AWS app service "appB"
-//    │   │   │   └── appB-localhost-ca.pem --> self-signed localhost CA cert for app service "appB"
+//    │   │   │   └── appB-localhost-ca.pem --> Self-signed localhost CA cert for app service "appB"
 //    │   │   │   └── appB-x509.pem         --> TLS cert for app service "appB"
 //    │   │   └── leaf                      --> Database access certs for cluster "leaf"
 //    │   │       └── appC-x509.pem         --> TLS cert for app service "appC"
@@ -201,7 +201,7 @@ func AppLocalhostCAPath(baseDir, proxy, username, cluster, appname string) strin
 // AWSCredentialsPath returns the path to an AWS credentials file for the
 // given proxy, cluster, and app.
 //
-// <baseDir>/keys/<proxy>/<username>-app/<cluster>/<appname>-localhost-ca.pem
+// <baseDir>/keys/<proxy>/<username>-app/<cluster>/<appname>-credentials
 func AWSCredentialsPath(baseDir, proxy, username, cluster, awsAppname string) string {
 	return filepath.Join(AppCertDir(baseDir, proxy, username, cluster), awsAppname+awsCredentialsSuffix)
 }

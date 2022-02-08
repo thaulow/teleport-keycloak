@@ -17,29 +17,51 @@ limitations under the License.
 package utils
 
 import (
+	"bytes"
+	"crypto/x509/pkix"
 	"io/ioutil"
+	"testing"
+	"time"
 
 	"github.com/gravitational/trace"
-
-	"gopkg.in/check.v1"
+	"github.com/stretchr/testify/require"
 )
 
-type CertsSuite struct{}
+func TestCertificateChain(t *testing.T) {
+	t.Run("rejects invalid PEMd data", func(t *testing.T) {
+		_, err := ReadCertificateChain([]byte("no data"))
+		require.True(t, trace.IsNotFound(err))
+	})
 
-var _ = check.Suite(&CertsSuite{})
+	t.Run("rejects self-signed certificate", func(t *testing.T) {
+		certificateChainBytes, err := ioutil.ReadFile("../../fixtures/certs/ca.pem")
+		require.NoError(t, err)
 
-func (s *CertsSuite) TestRejectsInvalidPEMData(c *check.C) {
-	_, err := ReadCertificateChain([]byte("no data"))
-	c.Assert(trace.Unwrap(err), check.FitsTypeOf, &trace.NotFoundError{})
+		certificateChain, err := ReadCertificateChain(certificateChainBytes)
+		require.NoError(t, err)
+
+		err = VerifyCertificateChain(certificateChain)
+		require.Error(t, err)
+		require.Equal(t, err.Error(), "x509: certificate signed by unknown authority")
+	})
 }
 
-func (s *CertsSuite) TestRejectsSelfSignedCertificate(c *check.C) {
-	certificateChainBytes, err := ioutil.ReadFile("../../fixtures/certs/ca.pem")
-	c.Assert(err, check.IsNil)
+func TestReadCertificates(t *testing.T) {
+	_, certPem1, err := GenerateSelfSignedSigningCert(pkix.Name{
+		CommonName: "cert1",
+	}, []string{"localhost"}, time.Hour)
+	require.NoError(t, err)
 
-	certificateChain, err := ReadCertificateChain(certificateChainBytes)
-	c.Assert(err, check.IsNil)
+	_, certPem2, err := GenerateSelfSignedSigningCert(pkix.Name{
+		CommonName: "cert2",
+	}, []string{"localhost"}, time.Hour)
+	require.NoError(t, err)
 
-	err = VerifyCertificateChain(certificateChain)
-	c.Assert(err, check.ErrorMatches, "x509: certificate signed by unknown authority")
+	bundleBytes := bytes.Join([][]byte{certPem1, certPem2}, []byte("\n"))
+
+	x509certs, err := ReadCertificates(bundleBytes)
+	require.NoError(t, err)
+	require.Len(t, x509certs, 2)
+	require.Equal(t, "cert1", x509certs[0].Issuer.CommonName)
+	require.Equal(t, "cert2", x509certs[1].Issuer.CommonName)
 }

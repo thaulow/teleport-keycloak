@@ -462,7 +462,7 @@ func (p *ProfileStatus) AppLocalhostCAPath(name string) string {
 // AWSCredentialsPath returns the specified app's AWS credentials file path for
 // this profile.
 //
-// It's kept in <profile-dir>/keys/<proxy>/<user>-app/<cluster>/<name>-localhost-ca.pem
+// It's kept in <profile-dir>/keys/<proxy>/<user>-app/<cluster>/<name>-credentials
 func (p *ProfileStatus) AWSCredentialsPath(name string) string {
 	return keypaths.AWSCredentialsPath(p.Dir, p.Name, p.Username, p.Cluster, name)
 }

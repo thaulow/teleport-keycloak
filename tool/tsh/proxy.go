@@ -213,7 +213,7 @@ func onProxyCommandAWS(cf *CLIConf) error {
 		return trace.Wrap(err)
 	}
 
-	localProxy, err := createLocalAWSCLIProxy(cf, profile, awsApp, credentials.NewCredentials(credProvider))
+	localProxy, err := createLocalAWSProxy(cf, profile, awsApp, credentials.NewCredentials(credProvider))
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -293,8 +293,8 @@ credentials saved in this temporary AWS credentials file:
 
   AWS_SHARED_CREDENTIALS_FILE={{.credentialsFile}}
 
-Alternatively, set the credentials directly using the following environment
-variables:
+Alternatively, use the following credentials directly:
+
   AWS_ACCESS_KEY_ID={{.AWS_ACCESS_KEY_ID}}
   AWS_SECRET_ACCESS_KEY={{.AWS_SECRET_ACCESS_KEY}}
   AWS_CA_BUNDLE={{.AWS_CA_BUNDLE}}

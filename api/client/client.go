@@ -20,6 +20,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -433,6 +434,9 @@ func (c *Client) grpcDialer() func(ctx context.Context, addr string) (net.Conn, 
 // alongside the DialInBackground client config option to wait until background dialing has completed.
 func (c *Client) waitForConnectionReady(ctx context.Context) error {
 	for {
+		if c.conn == nil {
+			return errors.New("conn was closed")
+		}
 		switch state := c.conn.GetState(); state {
 		case connectivity.Ready:
 			return nil

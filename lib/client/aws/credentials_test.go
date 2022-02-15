@@ -26,8 +26,8 @@ import (
 	"testing"
 	"time"
 
-	awssdkv2http "github.com/aws/aws-sdk-go-v2/aws/transport/http"
-	awssdkv2config "github.com/aws/aws-sdk-go-v2/config"
+	sdkv2http "github.com/aws/aws-sdk-go-v2/aws/transport/http"
+	sdkv2config "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/stretchr/testify/require"
@@ -47,7 +47,7 @@ func TestCredentialsFileProvider(t *testing.T) {
 	}
 	require.NoError(t, config.CheckAndSetDefaults())
 
-	// Prepare two certs in CA bundle file.
+	// Prepare two certs in CA bundle file. One is not expired.
 	entity := pkix.Name{CommonName: "credentials-ut", Organization: []string{"test"}}
 
 	_, certPem, err := tlsca.GenerateSelfSignedCA(entity, []string{"localhost"}, time.Hour)
@@ -57,6 +57,12 @@ func TestCredentialsFileProvider(t *testing.T) {
 
 	pems := bytes.Join([][]byte{expiredCertPem, certPem}, []byte("\n"))
 	require.NoError(t, os.WriteFile(caFilePath, pems, 0600))
+
+	// Unset some environment variables.
+	t.Setenv("AWS_ACCESS_KEY_ID", "")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
+	t.Setenv("AWS_CA_BUNDLE", "")
+	t.Setenv("AWS_SHARED_CREDENTIALS_FILE", "")
 
 	t.Run("SaveCredentialsFile", func(t *testing.T) {
 		credProvider, err := SaveCredentialsFile(config, credFilePath)
@@ -99,102 +105,99 @@ func TestCredentialsFileProvider(t *testing.T) {
 		})
 	})
 
-	t.Run("environment variables", func(t *testing.T) {
+	t.Run("AWS environment variables compatible", func(t *testing.T) {
 		credProvider, err := LoadCredentialsFile(credFilePath, defaultProfile)
 		require.NoError(t, err)
 
+		// Use t.Setenv
 		credProvider.Setenv = func(key, value string) error {
 			t.Setenv(key, value)
 			return nil
 		}
 
-		t.Run("Get", func(t *testing.T) {
-			envVars := credProvider.GetEnvironmentVariables()
-			require.Equal(t, map[string]string{
-				"AWS_ACCESS_KEY_ID":     "access-id",
-				"AWS_SECRET_ACCESS_KEY": "secret",
-				"AWS_CA_BUNDLE":         caFilePath,
-			}, envVars)
+		err = credProvider.SetEnvironmentVariables()
+		require.NoError(t, err)
+
+		t.Run("aws-sdk-go", func(t *testing.T) {
+			compatiableWithAWSSDK(t, config, entity, session.Options{})
 		})
 
-		t.Run("Set", func(t *testing.T) {
-			err = credProvider.SetEnvironmentVariables()
-			require.NoError(t, err)
-
-			for key, value := range credProvider.GetEnvironmentVariables() {
-				require.Equal(t, value, os.Getenv(key))
-			}
-		})
-
-		t.Run("aws-sdk-go compatible", func(t *testing.T) {
-			session, err := session.NewSession()
-			require.NoError(t, err)
-
-			// Verify access key and secret.
-			credValue, err := session.Config.Credentials.Get()
-			require.NoError(t, err)
-			require.Equal(t, "access-id", credValue.AccessKeyID)
-			require.Equal(t, "secret", credValue.SecretAccessKey)
-
-			// Verify CA bundle.
-			transport, ok := session.Config.HTTPClient.Transport.(*http.Transport)
-			require.True(t, ok)
-
-			verifyTransportWithRootCAs(t, transport, 2, entity.CommonName)
-		})
-
-		t.Run("aws-sdk-go-v2 compatible", func(t *testing.T) {
-			config, err := awssdkv2config.LoadDefaultConfig(context.TODO())
-			require.NoError(t, err)
-
-			retrievedCredentials, err := config.Credentials.Retrieve(context.TODO())
-			require.NoError(t, err)
-
-			require.Equal(t, "access-id", retrievedCredentials.AccessKeyID)
-			require.Equal(t, "secret", retrievedCredentials.SecretAccessKey)
-
-			client, ok := config.HTTPClient.(*awssdkv2http.BuildableClient)
-			require.True(t, ok)
-			verifyTransportWithRootCAs(t, client.GetTransport(), 2, entity.CommonName)
+		t.Run("aws-sdk-go-v2", func(t *testing.T) {
+			compatiableWithAWSSDKV2(t, config, entity)
 		})
 	})
 
-	t.Run("AWS_SHARED_CREDENTIALS_FILE compatible", func(t *testing.T) {
-		t.Setenv("AWS_ACCESS_KEY_ID", "")
-		t.Setenv("AWS_SECRET_ACCESS_KEY", "")
-		t.Setenv("AWS_CA_BUNDLE", "")
-		t.Setenv("AWS_SHARED_CREDENTIALS_FILE", credFilePath)
-
-		// Have to set Optionis.SharedConfigState to true or set environment
-		// variable "AWS_SDK_LOAD_CONFIG" to true, for aws-sdk-go to use
-		// "ca_bundle" from shared config.
-		session, err := session.NewSessionWithOptions(session.Options{
-			SharedConfigState: session.SharedConfigEnable,
+	t.Run("AWS shared credentials file compatible", func(t *testing.T) {
+		t.Run("aws-sdk-go", func(t *testing.T) {
+			// Shared credentials file can also be set through environment
+			// variable "AWS_SHARED_CREDENTIALS_FILE".
+			compatiableWithAWSSDK(t, config, entity, session.Options{
+				SharedConfigFiles: []string{credFilePath},
+			})
 		})
-		require.NoError(t, err)
 
-		// Verify access key and secret.
-		credValue, err := session.Config.Credentials.Get()
-		require.NoError(t, err)
-		require.Equal(t, "access-id", credValue.AccessKeyID)
-		require.Equal(t, "secret", credValue.SecretAccessKey)
-
-		// Verify CA bundle.
-		transport, ok := session.Config.HTTPClient.Transport.(*http.Transport)
-		require.True(t, ok)
-
-		verifyTransportWithRootCAs(t, transport, 2, entity.CommonName)
+		t.Run("aws-sdk-go-v2", func(t *testing.T) {
+			// Shared credentials file can also be set through environment
+			// variable "AWS_SHARED_CREDENTIALS_FILE".
+			// "ca_bundle" in shared credentials file is not currently
+			// supported in aws-sdk-go-v2. Needs to configure custom CA bundle
+			// through options or environment variable "AWS_CA_BUNDLE".
+			compatiableWithAWSSDKV2(t, config, entity,
+				sdkv2config.WithSharedCredentialsFiles([]string{credFilePath}),
+				sdkv2config.WithCustomCABundle(bytes.NewReader(pems)),
+			)
+		})
 	})
 }
 
-func verifyTransportWithRootCAs(t *testing.T, transport *http.Transport, numberOfCAs int, commonName string) {
+func compatiableWithAWSSDK(t *testing.T, expectedCredentials *CredentialsConfig, certEntity pkix.Name, options session.Options) {
+	t.Helper()
+
+	session, err := session.NewSessionWithOptions(options)
+	require.NoError(t, err)
+
+	// Verify access key and secret.
+	credValue, err := session.Config.Credentials.Get()
+	require.NoError(t, err)
+	require.Equal(t, expectedCredentials.AccessKeyID, credValue.AccessKeyID)
+	require.Equal(t, expectedCredentials.SecretAccessKey, credValue.SecretAccessKey)
+
+	// Verify CA bundle.
+	transport, ok := session.Config.HTTPClient.Transport.(*http.Transport)
+	require.True(t, ok)
+
+	verifyTransportWithRootCAs(t, transport, certEntity)
+}
+
+func compatiableWithAWSSDKV2(t *testing.T, expectedCredentials *CredentialsConfig, certEntity pkix.Name, optFns ...func(*sdkv2config.LoadOptions) error) {
+	t.Helper()
+
+	config, err := sdkv2config.LoadDefaultConfig(context.TODO(), optFns...)
+	require.NoError(t, err)
+
+	// Verify access key and secret.
+	retrievedCredentials, err := config.Credentials.Retrieve(context.TODO())
+	require.NoError(t, err)
+
+	require.Equal(t, expectedCredentials.AccessKeyID, retrievedCredentials.AccessKeyID)
+	require.Equal(t, expectedCredentials.SecretAccessKey, retrievedCredentials.SecretAccessKey)
+
+	// Verify CA bundle.
+	client, ok := config.HTTPClient.(*sdkv2http.BuildableClient)
+	require.True(t, ok)
+	verifyTransportWithRootCAs(t, client.GetTransport(), certEntity)
+}
+
+func verifyTransportWithRootCAs(t *testing.T, transport *http.Transport, certEntity pkix.Name) {
+	t.Helper()
+
 	require.NotNil(t, transport)
 	require.NotNil(t, transport.TLSClientConfig)
 	require.NotNil(t, transport.TLSClientConfig.RootCAs)
 
 	subjects := transport.TLSClientConfig.RootCAs.Subjects()
-	require.Len(t, subjects, numberOfCAs)
+	require.Greater(t, len(subjects), 0)
 	for _, subject := range subjects {
-		require.Contains(t, string(subject), commonName)
+		require.Contains(t, string(subject), certEntity.CommonName)
 	}
 }

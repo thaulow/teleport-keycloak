@@ -225,10 +225,14 @@ func onProxyCommandAWS(cf *CLIConf) error {
 	}()
 
 	endpointURL := url.URL{Scheme: "https", Host: localProxy.GetAddr()}
-	templateData := credProvider.GetEnvironmentVariables()
-	templateData["credentialsFile"] = profile.AWSCredentialsPath(awsApp)
-	templateData["address"] = localProxy.GetAddr()
-	templateData["endpointURL"] = endpointURL.String()
+	templateData := map[string]string{
+		"accessKeyID":     credProvider.AccessKeyID,
+		"secertAccessKey": credProvider.SecretAccessKey,
+		"caBundle":        credProvider.CustomCABundePath,
+		"credentialsFile": profile.AWSCredentialsPath(awsApp),
+		"address":         localProxy.GetAddr(),
+		"endpointURL":     endpointURL.String(),
+	}
 	if err = awsProxyTemplate.Execute(os.Stdout, templateData); err != nil {
 		return trace.Wrap(err)
 	}
@@ -289,21 +293,18 @@ Use the following credentials to connect to the {{.database}} proxy:
 	awsProxyTemplate = template.Must(template.New("").Parse(`Started AWS proxy on {{.address}}
 
 To connect to the proxy, set the following environment variable to use the
-credentials saved in this temporary AWS credentials file:
+credentials saved in this shared credentials file:
 
   AWS_SHARED_CREDENTIALS_FILE={{.credentialsFile}}
 
 Alternatively, use the following credentials directly:
 
-  AWS_ACCESS_KEY_ID={{.AWS_ACCESS_KEY_ID}}
-  AWS_SECRET_ACCESS_KEY={{.AWS_SECRET_ACCESS_KEY}}
-  AWS_CA_BUNDLE={{.AWS_CA_BUNDLE}}
+  AWS_ACCESS_KEY_ID={{.accessKeyID}}
+  AWS_SECRET_ACCESS_KEY={{.secertAccessKey}}
+  AWS_CA_BUNDLE={{.caBundle}}
 
 In addition to the credentials, please use "{{.endpointURL}}" as the endpoint
 URL(s) in your AWS client applications.
-
-For example, to get caller identity with AWS CLI:
-  AWS_SHARED_CREDENTIALS_FILE={{.credentialsFile}} aws sts get-caller-identity --endpoint-url={{.endpointURL}}
 
 `))
 )

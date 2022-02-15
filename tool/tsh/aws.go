@@ -109,7 +109,7 @@ func createLocalAWSProxy(cf *CLIConf, profile *client.ProfileStatus, awsApp stri
 		return nil, trace.Wrap(err)
 	}
 
-	appCerts, appX509Cert, err := loadAWSAppCertificate(tc, awsApp)
+	appCert, appX509Cert, err := loadAWSAppCertificate(tc, awsApp)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -119,16 +119,17 @@ func createLocalAWSProxy(cf *CLIConf, profile *client.ProfileStatus, awsApp stri
 		return nil, trace.Wrap(err)
 	}
 
-	address, err := utils.ParseAddr(tc.WebProxyAddr)
+	proxyAddress, err := utils.ParseAddr(tc.WebProxyAddr)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
-	localAddr := fmt.Sprintf("%s:0", defaults.Localhost)
+	localAddress := fmt.Sprintf("%s:0", defaults.Localhost)
 	if cf.LocalProxyPort != "" {
-		localAddr = fmt.Sprintf("%s:%s", defaults.Localhost, cf.LocalProxyPort)
+		localAddress = fmt.Sprintf("%s:%s", defaults.Localhost, cf.LocalProxyPort)
 	}
-	listener, err := tls.Listen("tcp", localAddr, &tls.Config{
+
+	listener, err := tls.Listen("tcp", localAddress, &tls.Config{
 		Certificates: []tls.Certificate{
 			localCert,
 		},
@@ -143,9 +144,9 @@ func createLocalAWSProxy(cf *CLIConf, profile *client.ProfileStatus, awsApp stri
 		Protocol:           alpncommon.ProtocolHTTP,
 		InsecureSkipVerify: cf.InsecureSkipVerify,
 		ParentContext:      cf.Context,
-		SNI:                address.Host(),
+		SNI:                proxyAddress.Host(),
 		AWSCredentials:     cred,
-		Certs:              []tls.Certificate{appCerts},
+		Certs:              []tls.Certificate{appCert},
 	})
 	if err != nil {
 		if cerr := listener.Close(); cerr != nil {
@@ -156,8 +157,7 @@ func createLocalAWSProxy(cf *CLIConf, profile *client.ProfileStatus, awsApp stri
 	return lp, nil
 }
 
-// loadAWSAppCertificate loads teleport issued certificate for the specified
-// AWS app.
+// loadAWSAppCertificate loads the certificate for the specified AWS app.
 func loadAWSAppCertificate(tc *client.TeleportClient, appName string) (tls.Certificate, *x509.Certificate, error) {
 	key, err := tc.LocalAgent().GetKey(tc.SiteName, client.WithAppCerts{})
 	if err != nil {
@@ -201,6 +201,7 @@ func printArrayAs(arr []string, columnName string) {
 
 func getARNFromFlags(cf *CLIConf, profile *client.ProfileStatus) (string, error) {
 	if cf.AWSRole == "" {
+		printArrayAs(profile.AWSRolesARNs, "Available Role ARNs")
 		return "", trace.BadParameter("--aws-role flag is required")
 	}
 	for _, v := range profile.AWSRolesARNs {
@@ -251,24 +252,25 @@ func mapKeysToSlice(m map[string]string) []string {
 	return out
 }
 
-// getAWSCredentialsProvider returns generated AWS credentials.
+// getAWSCredentialsProvider returns generated AWS credentials for the
+// specified AWS app.
 func getAWSCredentialsProvider(profile *client.ProfileStatus, awsAppName string) (*awscred.CredentialsFileProvider, error) {
 	credFilePath := profile.AWSCredentialsPath(awsAppName)
-	certPath := profile.AppLocalhostCAPath(awsAppName)
+	caPath := profile.AppLocalhostCAPath(awsAppName)
 
-	cred, err := awscred.LoadCredentialsFile(credFilePath, "")
+	cred, err := awscred.LoadCredentialsFile(credFilePath, awscred.DefaultProfile)
 	if err != nil {
 		log.WithError(err).Debugf("Failed to load AWS credentials file: %v.", credFilePath)
 		// Fallthrough to create new credentials file.
-	} else if cred.CustomCABundePath != certPath {
-		log.Debugf("CA bundle paths do not match. Expected %v, but got %v.", certPath, cred.CustomCABundePath)
+	} else if cred.CustomCABundePath != caPath {
+		log.Debugf("CA bundle paths do not match. Expected %v, but got %v.", caPath, cred.CustomCABundePath)
 		// Fallthrough to create new credentials file.
 	} else {
 		return cred, nil
 	}
 
-	if utils.FileExists(certPath) {
-		if err := os.Remove(certPath); err != nil {
+	if utils.FileExists(credFilePath) {
+		if err := os.Remove(credFilePath); err != nil {
 			return nil, trace.ConvertSystemError(err)
 		}
 	}
@@ -278,7 +280,7 @@ func getAWSCredentialsProvider(profile *client.ProfileStatus, awsAppName string)
 	// header which is verified by the local proxy that is using the same
 	// values. Access key has a length constraint of size between 16 and 128.
 	// Here access key and secert are generated based on current profile and
-	// app name so same credentials can be recreated for the same app.
+	// app name so same values can be recreated.
 	//
 	// https://docs.aws.amazon.com/STS/latest/APIReference/API_Credentials.html
 	hashData := []byte(fmt.Sprintf("%v-%v-%v", profile.Name, profile.Username, awsAppName))
@@ -287,7 +289,7 @@ func getAWSCredentialsProvider(profile *client.ProfileStatus, awsAppName string)
 	config := &awscred.CredentialsConfig{
 		AccessKeyID:       hex.EncodeToString(md5sum[:])[:16],
 		SecretAccessKey:   hex.EncodeToString(sha1sum[:]),
-		CustomCABundePath: certPath,
+		CustomCABundePath: caPath,
 	}
 	return awscred.SaveCredentialsFile(config, credFilePath)
 }
@@ -296,24 +298,25 @@ func getAWSCredentialsProvider(profile *client.ProfileStatus, awsAppName string)
 // or creates one if local cert does not exist or is expired.
 func getSelfSignedLocalCert(profile *client.ProfileStatus, appName string, appCert *x509.Certificate) (tls.Certificate, error) {
 	keyPath := profile.KeyPath()
-	certPath := profile.AppLocalhostCAPath(appName)
+	caPath := profile.AppLocalhostCAPath(appName)
 
-	if utils.FileExists(certPath) {
-		cert, err := loadSelfSignedLocalCert(certPath, keyPath)
+	if utils.FileExists(caPath) {
+		cert, err := loadSelfSignedLocalCert(caPath, keyPath)
 		if err == nil {
 			return cert, nil
 		}
 
-		log.WithError(err).Debugf("Failed to load self signed certificates from %v", certPath)
+		// Fallthrough to generate new ones.
+		log.WithError(err).Debugf("Failed to load self signed certificates from %v.", caPath)
 	}
 
-	return newSelfSignedLocalCert(certPath, keyPath, appCert.NotAfter)
+	return newSelfSignedLocalCert(caPath, keyPath, appCert.NotAfter)
 }
 
 // loadSelfSignedLocalCert loads cert and key pair from specified path and
 // verifies its expiry.
-func loadSelfSignedLocalCert(certPath, keyPath string) (tls.Certificate, error) {
-	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
+func loadSelfSignedLocalCert(caPath, keyPath string) (tls.Certificate, error) {
+	cert, err := tls.LoadX509KeyPair(caPath, keyPath)
 	if err != nil {
 		return tls.Certificate{}, trace.Wrap(err)
 	}
@@ -334,7 +337,7 @@ func loadSelfSignedLocalCert(certPath, keyPath string) (tls.Certificate, error) 
 }
 
 // newSelfSignedLocalCert generates new self signed local cert.
-func newSelfSignedLocalCert(certPath, keyPath string, notAfter time.Time) (tls.Certificate, error) {
+func newSelfSignedLocalCert(caPath, keyPath string, notAfter time.Time) (tls.Certificate, error) {
 	keyPem, err := utils.ReadPath(keyPath)
 	if err != nil {
 		return tls.Certificate{}, trace.Wrap(err)
@@ -366,7 +369,7 @@ func newSelfSignedLocalCert(certPath, keyPath string, notAfter time.Time) (tls.C
 	}
 
 	// WriteFile truncates existing file before writing.
-	if err = os.WriteFile(certPath, certPem, 0600); err != nil {
+	if err = os.WriteFile(caPath, certPem, 0600); err != nil {
 		return tls.Certificate{}, trace.ConvertSystemError(err)
 	}
 	return cert, nil

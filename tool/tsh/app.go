@@ -26,6 +26,7 @@ import (
 	"github.com/gravitational/teleport/api/types"
 	"github.com/gravitational/teleport/lib/client"
 	"github.com/gravitational/teleport/lib/tlsca"
+	"github.com/gravitational/teleport/lib/utils"
 
 	"github.com/gravitational/trace"
 )
@@ -162,6 +163,10 @@ func onAppLogout(cf *CLIConf) error {
 		if err != nil {
 			return trace.Wrap(err)
 		}
+
+		if err = deleteAppFiles(profile, app.Name); err != nil {
+			return trace.Wrap(err)
+		}
 	}
 	if len(logout) == 1 {
 		fmt.Printf("Logged out of app %q\n", logout[0].Name)
@@ -247,6 +252,23 @@ func pickActiveApp(cf *CLIConf) (*tlsca.RouteToApp, error) {
 		}
 	}
 	return nil, trace.NotFound("not logged into app %q", name)
+}
+
+// deleteAppFiles deletes generated files for the specified app.
+func deleteAppFiles(profile *client.ProfileStatus, appName string) error {
+	for _, filePath := range []string{
+		profile.AppLocalhostCAPath(appName),
+		profile.AWSCredentialsPath(appName),
+	} {
+		if !utils.FileExists(filePath) {
+			continue
+		}
+
+		if err := os.Remove(filePath); err != nil {
+			return trace.ConvertSystemError(err)
+		}
+	}
+	return nil
 }
 
 const (

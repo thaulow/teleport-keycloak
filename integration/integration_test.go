@@ -4033,23 +4033,28 @@ func testRotateTrustedClusters(t *testing.T, suite *integrationTestSuite) {
 				Clock:     tconf.Clock,
 				Client:    aux.GetSiteAPI(clusterAux),
 			},
-			WatchHostCA: true,
+			Types: []types.CertAuthType{types.HostCA},
 		})
 		if err != nil {
 			return err
 		}
 		defer watcher.Close()
 
+		sub, err := watcher.Subscribe(ctx, services.CertAuthorityTarget{ClusterName: clusterMain, Type: types.HostCA})
+		require.NoError(t, err)
 		var lastPhase string
 		for i := 0; i < 10; i++ {
 			select {
 			case <-ctx.Done():
 				return trace.CompareFailed("failed to converge to phase %q, last phase %q", phase, lastPhase)
-			case cas := <-watcher.CertAuthorityC:
-				for _, ca := range cas {
-					if ca.GetClusterName() == clusterMain &&
-						ca.GetType() == types.HostCA &&
-						ca.GetRotation().Phase == phase {
+			case evt := <-sub.Events():
+				switch evt.Type {
+				case types.OpPut:
+					ca, ok := evt.Resource.(types.CertAuthority)
+					if !ok {
+						return trace.BadParameter("expected a ca got type %T", evt.Resource)
+					}
+					if ca.GetRotation().Phase == phase {
 						return nil
 					}
 					lastPhase = ca.GetRotation().Phase

@@ -276,6 +276,16 @@ func (s *WebSuite) SetUpTest(c *C) {
 	})
 	c.Assert(err, IsNil)
 
+	caWatcher, err := services.NewCertAuthorityWatcher(s.ctx, services.CertAuthorityWatcherConfig{
+		ResourceWatcherConfig: services.ResourceWatcherConfig{
+			Component: teleport.ComponentProxy,
+			Client:    s.proxyClient,
+		},
+		Types: []types.CertAuthType{types.HostCA, types.UserCA},
+	})
+	c.Assert(err, IsNil)
+	defer caWatcher.Close()
+
 	revTunServer, err := reversetunnel.NewServer(reversetunnel.Config{
 		ID:                    node.ID(),
 		Listener:              revTunListener,
@@ -289,6 +299,7 @@ func (s *WebSuite) SetUpTest(c *C) {
 		DirectClusters:        []reversetunnel.DirectCluster{{Name: s.server.ClusterName(), Client: s.proxyClient}},
 		DataDir:               c.MkDir(),
 		LockWatcher:           proxyLockWatcher,
+		CertAuthorityWatcher:  caWatcher,
 	})
 	c.Assert(err, IsNil)
 	s.proxyTunnel = revTunServer
@@ -3477,6 +3488,16 @@ func createProxy(ctx context.Context, t *testing.T, proxyID string, node *regula
 	require.NoError(t, err)
 	t.Cleanup(proxyLockWatcher.Close)
 
+	proxyCAWatcher, err := services.NewCertAuthorityWatcher(ctx, services.CertAuthorityWatcherConfig{
+		ResourceWatcherConfig: services.ResourceWatcherConfig{
+			Component: teleport.ComponentProxy,
+			Client:    client,
+		},
+		Types: []types.CertAuthType{types.HostCA, types.UserCA},
+	})
+	require.NoError(t, err)
+	t.Cleanup(proxyLockWatcher.Close)
+
 	revTunServer, err := reversetunnel.NewServer(reversetunnel.Config{
 		ID:                    node.ID(),
 		Listener:              revTunListener,
@@ -3490,6 +3511,7 @@ func createProxy(ctx context.Context, t *testing.T, proxyID string, node *regula
 		DirectClusters:        []reversetunnel.DirectCluster{{Name: authServer.ClusterName(), Client: client}},
 		DataDir:               t.TempDir(),
 		LockWatcher:           proxyLockWatcher,
+		CertAuthorityWatcher:  proxyCAWatcher,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, revTunServer.Close()) })

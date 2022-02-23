@@ -411,9 +411,7 @@ func (s *remoteSite) compareAndSwapCertAuthority(ca types.CertAuthority) error {
 	return trace.CompareFailed("remote certificate authority rotation has been updated")
 }
 
-func (s *remoteSite) updateCertAuthorities(retry utils.Retry) {
-	s.Debugf("Watching for cert authority changes.")
-
+func (s *remoteSite) updateCertAuthorities(retry utils.Retry, remoteWatcher *services.CertAuthorityWatcher) {
 	for {
 		startedWaiting := s.clock.Now()
 		select {
@@ -424,7 +422,7 @@ func (s *remoteSite) updateCertAuthorities(retry utils.Retry) {
 			return
 		}
 
-		err := s.watchCertAuthorities()
+		err := s.watchCertAuthorities(remoteWatcher)
 		if err != nil {
 			switch {
 			case trace.IsNotFound(err):
@@ -440,56 +438,63 @@ func (s *remoteSite) updateCertAuthorities(retry utils.Retry) {
 				s.Warningf("Could not perform cert authorities update: %v.", trace.DebugReport(err))
 			}
 		}
-
 	}
 }
 
-func (s *remoteSite) watchCertAuthorities() error {
-	localWatcher, err := services.NewCertAuthorityWatcher(s.ctx, services.CertAuthorityWatcherConfig{
-		ResourceWatcherConfig: services.ResourceWatcherConfig{
-			Component: teleport.ComponentProxy,
-			Log:       s,
-			Clock:     s.clock,
-			Client:    s.localAccessPoint,
+func (s *remoteSite) watchCertAuthorities(remoteWatcher *services.CertAuthorityWatcher) error {
+	localWatch, err := s.srv.CertAuthorityWatcher.Subscribe(
+		s.ctx,
+		services.CertAuthorityTarget{
+			ClusterName: s.srv.ClusterName,
+			Type:        types.HostCA,
 		},
-		WatchUserCA: true,
-		WatchHostCA: true,
-	})
+		services.CertAuthorityTarget{
+			ClusterName: s.srv.ClusterName,
+			Type:        types.UserCA,
+		},
+	)
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	defer localWatcher.Close()
+	defer func() {
+		if err := localWatch.Close(); err != nil {
+			s.WithError(err).Warn("Failed to close local ca watcher subscription.")
+		}
+	}()
 
-	remoteWatcher, err := services.NewCertAuthorityWatcher(s.ctx, services.CertAuthorityWatcherConfig{
-		ResourceWatcherConfig: services.ResourceWatcherConfig{
-			Component: teleport.ComponentProxy,
-			Log:       s,
-			Clock:     s.clock,
-			Client:    s.remoteAccessPoint,
+	remoteWatch, err := remoteWatcher.Subscribe(
+		s.ctx,
+		services.CertAuthorityTarget{
+			ClusterName: s.domainName,
+			Type:        types.HostCA,
 		},
-		WatchHostCA: true,
-	})
+	)
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	defer remoteWatcher.Close()
+	defer func() {
+		if err := remoteWatch.Close(); err != nil {
+			s.WithError(err).Warn("Failed to close remote ca watcher subscription.")
+		}
+	}()
 
+	s.Debugf("Watching for cert authority changes.")
 	for {
 		select {
 		case <-s.ctx.Done():
 			s.WithError(s.ctx.Err()).Debug("Context is closing.")
 			return trace.Wrap(s.ctx.Err())
-		case <-localWatcher.Done():
+		case <-localWatch.Done():
 			s.Warn("Local CertAuthority watcher subscription has closed")
 			return fmt.Errorf("local ca watcher for cluster %s has closed", s.srv.ClusterName)
-		case <-remoteWatcher.Done():
+		case <-remoteWatch.Done():
 			s.Warn("Remote CertAuthority watcher subscription has closed")
 			return fmt.Errorf("remote ca watcher for cluster %s has closed", s.domainName)
-		case cas := <-localWatcher.CertAuthorityC:
-			for _, localCA := range cas {
-				if localCA.GetClusterName() != s.srv.ClusterName ||
-					(localCA.GetType() != types.HostCA &&
-						localCA.GetType() != types.UserCA) {
+		case evt := <-localWatch.Events():
+			switch evt.Type {
+			case types.OpPut:
+				localCA, ok := evt.Resource.(types.CertAuthority)
+				if !ok {
 					continue
 				}
 
@@ -498,10 +503,11 @@ func (s *remoteSite) watchCertAuthorities() error {
 					return trace.Wrap(err)
 				}
 			}
-		case cas := <-remoteWatcher.CertAuthorityC:
-			for _, remoteCA := range cas {
-				if remoteCA.GetType() != types.HostCA ||
-					remoteCA.GetClusterName() != s.domainName {
+		case evt := <-remoteWatch.Events():
+			switch evt.Type {
+			case types.OpPut:
+				remoteCA, ok := evt.Resource.(types.CertAuthority)
+				if !ok {
 					continue
 				}
 

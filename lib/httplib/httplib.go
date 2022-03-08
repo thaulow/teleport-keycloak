@@ -30,6 +30,7 @@ import (
 	"github.com/gravitational/teleport"
 	"github.com/gravitational/teleport/lib/httplib/csrf"
 	"github.com/gravitational/teleport/lib/utils"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/gravitational/roundtrip"
 	"github.com/gravitational/trace"
@@ -54,7 +55,17 @@ type ErrorWriter func(w http.ResponseWriter, err error)
 
 // MakeHandler returns a new httprouter.Handle func from a handler func
 func MakeHandler(fn HandlerFunc) httprouter.Handle {
-	return MakeHandlerWithErrorWriter(fn, trace.WriteError)
+	return MakeTraceHandler(MakeHandlerWithErrorWriter(fn, trace.WriteError))
+}
+
+func MakeTraceHandler(h httprouter.Handle) httprouter.Handle {
+	return func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		hf := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			h(w, r, p)
+		})
+
+		otelhttp.NewHandler(hf, r.RequestURI).ServeHTTP(w, r)
+	}
 }
 
 // MakeHandlerWithErrorWriter returns a httprouter.Handle from the HandlerFunc,

@@ -34,6 +34,7 @@ import (
 	"github.com/gravitational/teleport/api/defaults"
 	"github.com/gravitational/teleport/api/utils"
 	"github.com/gravitational/trace"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -41,12 +42,12 @@ import (
 // newWebClient creates a new client to the HTTPS web proxy.
 func newWebClient(insecure bool, pool *x509.CertPool) *http.Client {
 	return &http.Client{
-		Transport: &http.Transport{
+		Transport: otelhttp.NewTransport(&http.Transport{
 			TLSClientConfig: &tls.Config{
 				RootCAs:            pool,
 				InsecureSkipVerify: insecure,
 			},
-		},
+		}),
 	}
 }
 

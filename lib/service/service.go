@@ -40,6 +40,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gravitational/teleport/tracing"
+	"go.opentelemetry.io/otel/attribute"
 	"golang.org/x/crypto/acme"
 	"golang.org/x/crypto/acme/autocert"
 	"golang.org/x/crypto/ssh"
@@ -698,6 +700,10 @@ func NewTeleport(cfg *Config) (*TeleportProcess, error) {
 		}
 	} else {
 		warnOnErr(process.closeImportedDescriptors(teleport.ComponentDiagnostic), process.log)
+	}
+
+	if err := process.initTracing(); err != nil {
+		return nil, trace.Wrap(err)
 	}
 
 	// Create a process wide key generator that will be shared. This is so the
@@ -2001,6 +2007,56 @@ func (process *TeleportProcess) initUploaderService(accessPoint auth.AccessPoint
 		log.Infof("File uploader is shutting down.")
 		warnOnErr(fileUploader.Close(), log)
 		log.Infof("File uploader has shut down.")
+	})
+
+	return nil
+}
+
+func (process *TeleportProcess) initTracing() error {
+	process.log.Info("Initializing tracing provider and exporter.")
+
+	var components []string
+	if process.Config.Auth.Enabled {
+		components = append(components, teleport.ComponentAuth)
+	}
+	if process.Config.Proxy.Enabled {
+		components = append(components, teleport.ComponentProxy)
+	}
+	if process.Config.SSH.Enabled {
+		components = append(components, teleport.ComponentNode)
+	}
+
+	attrs := []attribute.KeyValue{
+		attribute.StringSlice("teleport.services", components),
+		attribute.String("teleport.process.id", process.id),
+		attribute.String("teleport.host.name", process.Config.Hostname),
+		attribute.String("teleport.host.uuid", process.Config.HostUUID),
+	}
+
+	closeTracing, err := tracing.InitializeTraceProvider(process.ExitContext(), tracing.Config{
+		Service:     "teleport",
+		Directory:   process.Config.DataDir,
+		Attributes:  attrs,
+		SampleRatio: 1.0,
+	})
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	log := process.log.WithFields(logrus.Fields{
+		trace.Component: teleport.Component("tracing", process.id),
+	})
+
+	process.OnExit("tracing.shutdown", func(payload interface{}) {
+		if payload == nil {
+			log.Info("Shutting down immediately.")
+			closeTracing(context.Background())
+		} else {
+			log.Infof("Shutting down gracefully.")
+			ctx := payloadContext(payload, log)
+			closeTracing(ctx)
+		}
+		process.log.Info("Exited.")
 	})
 
 	return nil

@@ -29,6 +29,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gravitational/form"
 	"github.com/gravitational/teleport/api/client/proto"
 	apidefaults "github.com/gravitational/teleport/api/defaults"
 	"github.com/gravitational/teleport/api/types"
@@ -40,8 +41,6 @@ import (
 	"github.com/gravitational/teleport/lib/services"
 	"github.com/gravitational/teleport/lib/session"
 	"github.com/gravitational/teleport/lib/utils"
-
-	"github.com/gravitational/form"
 	"github.com/gravitational/trace"
 	"github.com/jonboulle/clockwork"
 	"github.com/julienschmidt/httprouter"
@@ -199,57 +198,62 @@ func NewAPIServer(config *APIConfig) (http.Handler, error) {
 	srv.DELETE("/:version/roles/:role", srv.withAuth(srv.deleteRole))
 
 	// cluster configuration
-	srv.GET("/:version/configuration", srv.withAuth(srv.getClusterConfig))
-	srv.POST("/:version/configuration", srv.withAuth(srv.setClusterConfig))
-	srv.GET("/:version/configuration/name", srv.withAuth(srv.getClusterName))
-	srv.POST("/:version/configuration/name", srv.withAuth(srv.setClusterName))
-	srv.GET("/:version/configuration/static_tokens", srv.withAuth(srv.getStaticTokens))
-	srv.DELETE("/:version/configuration/static_tokens", srv.withAuth(srv.deleteStaticTokens))
-	srv.POST("/:version/configuration/static_tokens", srv.withAuth(srv.setStaticTokens))
-	srv.GET("/:version/authentication/preference", srv.withAuth(srv.getClusterAuthPreference))
-	srv.POST("/:version/authentication/preference", srv.withAuth(srv.setClusterAuthPreference))
+	srv.GET("/:version/configuration/name", httplib.MakeTraceHandler(srv.withAuth(srv.getClusterName)))
+	srv.POST("/:version/configuration/name", httplib.MakeTraceHandler(srv.withAuth(srv.setClusterName)))
+	srv.GET("/:version/configuration/static_tokens", httplib.MakeTraceHandler(srv.withAuth(srv.getStaticTokens)))
+	srv.DELETE("/:version/configuration/static_tokens", httplib.MakeTraceHandler(srv.withAuth(srv.deleteStaticTokens)))
+	srv.POST("/:version/configuration/static_tokens", httplib.MakeTraceHandler(srv.withAuth(srv.setStaticTokens)))
+	srv.GET("/:version/authentication/preference", httplib.MakeTraceHandler(srv.withAuth(srv.getClusterAuthPreference)))
+	srv.POST("/:version/authentication/preference", httplib.MakeTraceHandler(srv.withAuth(srv.setClusterAuthPreference)))
 
 	// OIDC
-	srv.POST("/:version/oidc/connectors", srv.withAuth(srv.upsertOIDCConnector))
-	srv.GET("/:version/oidc/connectors", srv.withAuth(srv.getOIDCConnectors))
-	srv.GET("/:version/oidc/connectors/:id", srv.withAuth(srv.getOIDCConnector))
-	srv.DELETE("/:version/oidc/connectors/:id", srv.withAuth(srv.deleteOIDCConnector))
-	srv.POST("/:version/oidc/requests/create", srv.withAuth(srv.createOIDCAuthRequest))
-	srv.POST("/:version/oidc/requests/validate", srv.withAuth(srv.validateOIDCAuthCallback))
+	srv.POST("/:version/oidc/connectors", httplib.MakeTraceHandler(srv.withAuth(srv.upsertOIDCConnector)))
+	srv.GET("/:version/oidc/connectors", httplib.MakeTraceHandler(srv.withAuth(srv.getOIDCConnectors)))
+	srv.GET("/:version/oidc/connectors/:id", httplib.MakeTraceHandler(srv.withAuth(srv.getOIDCConnector)))
+	srv.DELETE("/:version/oidc/connectors/:id", httplib.MakeTraceHandler(srv.withAuth(srv.deleteOIDCConnector)))
+	srv.POST("/:version/oidc/requests/create", httplib.MakeTraceHandler(srv.withAuth(srv.createOIDCAuthRequest)))
+	srv.POST("/:version/oidc/requests/validate", httplib.MakeTraceHandler(srv.withAuth(srv.validateOIDCAuthCallback)))
 
 	// SAML handlers
-	srv.POST("/:version/saml/connectors", srv.withAuth(srv.createSAMLConnector))
-	srv.PUT("/:version/saml/connectors", srv.withAuth(srv.upsertSAMLConnector))
-	srv.GET("/:version/saml/connectors", srv.withAuth(srv.getSAMLConnectors))
-	srv.GET("/:version/saml/connectors/:id", srv.withAuth(srv.getSAMLConnector))
-	srv.DELETE("/:version/saml/connectors/:id", srv.withAuth(srv.deleteSAMLConnector))
-	srv.POST("/:version/saml/requests/create", srv.withAuth(srv.createSAMLAuthRequest))
-	srv.POST("/:version/saml/requests/validate", srv.withAuth(srv.validateSAMLResponse))
+	srv.POST("/:version/saml/connectors", httplib.MakeTraceHandler(srv.withAuth(srv.createSAMLConnector)))
+	srv.PUT("/:version/saml/connectors", httplib.MakeTraceHandler(srv.withAuth(srv.upsertSAMLConnector)))
+	srv.GET("/:version/saml/connectors", httplib.MakeTraceHandler(srv.withAuth(srv.getSAMLConnectors)))
+	srv.GET("/:version/saml/connectors/:id", httplib.MakeTraceHandler(srv.withAuth(srv.getSAMLConnector)))
+	srv.DELETE("/:version/saml/connectors/:id", httplib.MakeTraceHandler(srv.withAuth(srv.deleteSAMLConnector)))
+	srv.POST("/:version/saml/requests/create", httplib.MakeTraceHandler(srv.withAuth(srv.createSAMLAuthRequest)))
+	srv.POST("/:version/saml/requests/validate", httplib.MakeTraceHandler(srv.withAuth(srv.validateSAMLResponse)))
 
 	// Github connector
-	srv.POST("/:version/github/connectors", srv.withAuth(srv.createGithubConnector))
-	srv.PUT("/:version/github/connectors", srv.withAuth(srv.upsertGithubConnector))
-	srv.GET("/:version/github/connectors", srv.withAuth(srv.getGithubConnectors))
-	srv.GET("/:version/github/connectors/:id", srv.withAuth(srv.getGithubConnector))
-	srv.DELETE("/:version/github/connectors/:id", srv.withAuth(srv.deleteGithubConnector))
-	srv.POST("/:version/github/requests/create", srv.withAuth(srv.createGithubAuthRequest))
-	srv.POST("/:version/github/requests/validate", srv.withAuth(srv.validateGithubAuthCallback))
+	srv.POST("/:version/github/connectors", httplib.MakeTraceHandler(srv.withAuth(srv.createGithubConnector)))
+	srv.PUT("/:version/github/connectors", httplib.MakeTraceHandler(srv.withAuth(srv.upsertGithubConnector)))
+	srv.GET("/:version/github/connectors", httplib.MakeTraceHandler(srv.withAuth(srv.getGithubConnectors)))
+	srv.GET("/:version/github/connectors/:id", httplib.MakeTraceHandler(srv.withAuth(srv.getGithubConnector)))
+	srv.DELETE("/:version/github/connectors/:id", httplib.MakeTraceHandler(srv.withAuth(srv.deleteGithubConnector)))
+	srv.POST("/:version/github/requests/create", httplib.MakeTraceHandler(srv.withAuth(srv.createGithubAuthRequest)))
+	srv.POST("/:version/github/requests/validate", httplib.MakeTraceHandler(srv.withAuth(srv.validateGithubAuthCallback)))
 
 	// U2F
-	srv.GET("/:version/u2f/signuptokens/:token", srv.withAuth(srv.getSignupU2FRegisterRequest))
-	srv.POST("/:version/u2f/users/:user/sign", srv.withAuth(srv.u2fSignRequest))
-	srv.GET("/:version/u2f/appid", srv.withAuth(srv.getU2FAppID))
+	// DELETE IN 9.x, superseded by /mfa/ endpoints (codingllama)
+	srv.GET("/:version/u2f/signuptokens/:token", httplib.MakeTraceHandler(srv.withAuth(srv.getSignupU2FRegisterRequest)))
+	srv.POST("/:version/u2f/users/:user/sign", httplib.MakeTraceHandler(srv.withAuth(srv.u2fSignRequest)))
+	srv.GET("/:version/u2f/appid", httplib.MakeTraceHandler(srv.withAuth(srv.getU2FAppID)))
+
+	// Generic MFA and WebAuthn
+	srv.GET("/:version/u2f/signuptokens/:token", httplib.MakeTraceHandler(srv.withAuth(srv.getSignupU2FRegisterRequest)))
+	srv.POST("/:version/u2f/users/:user/sign", httplib.MakeTraceHandler(srv.withAuth(srv.u2fSignRequest)))
+	srv.GET("/:version/u2f/appid", httplib.MakeTraceHandler(srv.withAuth(srv.getU2FAppID)))
+	// /web/authenticate endpoints.
 
 	// Provisioning tokens- Moved to grpc
 	// DELETE IN 8.0
-	srv.GET("/:version/tokens", srv.withAuth(srv.getTokens))
-	srv.GET("/:version/tokens/:token", srv.withAuth(srv.getToken))
-	srv.DELETE("/:version/tokens/:token", srv.withAuth(srv.deleteToken))
+	srv.GET("/:version/tokens", httplib.MakeTraceHandler(srv.withAuth(srv.getTokens)))
+	srv.GET("/:version/tokens/:token", httplib.MakeTraceHandler(srv.withAuth(srv.getToken)))
+	srv.DELETE("/:version/tokens/:token", httplib.MakeTraceHandler(srv.withAuth(srv.deleteToken)))
 
 	// Audit logs AKA events
-	srv.POST("/:version/events", srv.withAuth(srv.emitAuditEvent))
-	srv.GET("/:version/events", srv.withAuth(srv.searchEvents))
-	srv.GET("/:version/events/session", srv.withAuth(srv.searchSessionEvents))
+	srv.POST("/:version/events", httplib.MakeTraceHandler(srv.withAuth(srv.emitAuditEvent)))
+	srv.GET("/:version/events", httplib.MakeTraceHandler(srv.withAuth(srv.searchEvents)))
+	srv.GET("/:version/events/session", httplib.MakeTraceHandler(srv.withAuth(srv.searchSessionEvents)))
 
 	if config.PluginRegistry != nil {
 		if err := config.PluginRegistry.RegisterAuthWebHandlers(&srv); err != nil {

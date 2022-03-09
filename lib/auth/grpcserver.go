@@ -3030,10 +3030,10 @@ func NewGRPCServer(cfg GRPCServerConfig) (*GRPCServer, error) {
 		}),
 		grpc.ChainUnaryInterceptor(
 			otelgrpc.UnaryServerInterceptor(),
-			cfg.UnaryInterceptor),
+			grpcErrorConvertUnaryInterceptor(cfg.UnaryInterceptor)),
 		grpc.ChainStreamInterceptor(
 			otelgrpc.StreamServerInterceptor(),
-			cfg.StreamInterceptor),
+			grpcErrorConvertStreamInterceptor(cfg.StreamInterceptor)),
 		grpc.KeepaliveParams(
 			keepalive.ServerParameters{
 				Time:    cfg.KeepAlivePeriod,

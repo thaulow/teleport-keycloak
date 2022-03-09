@@ -372,7 +372,7 @@ func (rc *ResourceCommand) createRole(ctx context.Context, client auth.ClientI, 
 	if err != nil && !trace.IsNotFound(err) {
 		return trace.Wrap(err)
 	}
-	roleExists := (err == nil)
+	roleExists := err == nil
 	if roleExists && !rc.IsForced() {
 		return trace.AlreadyExists("role '%s' already exists", roleName)
 	}
@@ -395,7 +395,7 @@ func (rc *ResourceCommand) createUser(ctx context.Context, client auth.ClientI, 
 	if err != nil && !trace.IsNotFound(err) {
 		return trace.Wrap(err)
 	}
-	exists := (err == nil)
+	exists := err == nil
 
 	if exists {
 		if !rc.force {

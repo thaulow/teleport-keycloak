@@ -20,6 +20,8 @@ package regular
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -31,6 +33,8 @@ import (
 	"strings"
 	"sync"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 	"golang.org/x/crypto/ssh"
 
 	"github.com/gravitational/teleport"
@@ -1524,7 +1528,18 @@ func (s *Server) handleEnv(ch ssh.Channel, req *ssh.Request, ctx *srv.ServerCont
 		ctx.Error(err)
 		return trace.Wrap(err, "failed to parse env request")
 	}
-	ctx.SetEnv(e.Name, e.Value)
+
+	if e.Name != sshutils.TraceContextVar {
+		ctx.SetEnv(e.Name, e.Value)
+		return nil
+	}
+
+	var carrier propagation.MapCarrier
+	if err := json.NewDecoder(base64.NewDecoder(base64.StdEncoding, strings.NewReader(e.Value))).Decode(&carrier); err != nil {
+		return nil
+	}
+
+	ctx.WithTraceContext(otel.GetTextMapPropagator().Extract(ctx.CancelContext(), carrier))
 	return nil
 }
 

@@ -400,6 +400,12 @@ func NewServerContext(ctx context.Context, parent *sshutils.ConnectionContext, s
 	return ctx, child, nil
 }
 
+func (c *ServerContext) WithTraceContext(ctx context.Context) {
+	c.mu.Lock()
+	c.mu.Unlock()
+	c.cancelContext = ctx
+}
+
 // Parent grants access to the connection-level context of which this
 // is a subcontext.  Useful for unambiguously accessing methods which
 // this subcontext overrides (e.g. child.Parent().SetEnv(...)).
@@ -647,6 +653,8 @@ func (c *ServerContext) Close() error {
 // CancelContext is a context associated with server context,
 // closed whenever this server context is closed
 func (c *ServerContext) CancelContext() context.Context {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	return c.cancelContext
 }
 
@@ -804,7 +812,7 @@ func (c *ServerContext) ExecCommand() (*ExecCommand, error) {
 		return nil, trace.Wrap(err)
 	}
 
-	pamConfig, err := getPAMConfig(c.cancelContext, c)
+	pamConfig, err := getPAMConfig(c.CancelContext(), c)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -876,7 +884,7 @@ func buildEnvironment(ctx *ServerContext) []string {
 	// Set some Teleport specific environment variables: SSH_TELEPORT_USER,
 	// SSH_SESSION_WEBPROXY_ADDR, SSH_TELEPORT_HOST_UUID, and
 	// SSH_TELEPORT_CLUSTER_NAME.
-	env = append(env, teleport.SSHSessionWebproxyAddr+"="+ctx.ProxyPublicAddress(ctx.cancelContext))
+	env = append(env, teleport.SSHSessionWebproxyAddr+"="+ctx.ProxyPublicAddress(ctx.CancelContext()))
 	env = append(env, teleport.SSHTeleportHostUUID+"="+ctx.srv.ID())
 	env = append(env, teleport.SSHTeleportClusterName+"="+ctx.ClusterName)
 	env = append(env, teleport.SSHTeleportUser+"="+ctx.Identity.TeleportUser)

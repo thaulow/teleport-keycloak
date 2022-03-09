@@ -23,6 +23,9 @@ import (
 
 	"github.com/gravitational/trace"
 	"github.com/jonboulle/clockwork"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
 // Wrapper wraps a Backend implementation that can fail
@@ -33,12 +36,15 @@ type Wrapper struct {
 	// readErr if set, will result in an error returned
 	// on every read operation
 	readErr error
+
+	tr oteltrace.Tracer
 }
 
 // NewWrapper returns a new Wrapper.
 func NewWrapper(backend Backend) *Wrapper {
 	return &Wrapper{
 		backend: backend,
+		tr:      otel.GetTracerProvider().Tracer("Backend"),
 	}
 }
 
@@ -59,6 +65,16 @@ func (s *Wrapper) SetReadError(err error) {
 
 // GetRange returns query range
 func (s *Wrapper) GetRange(ctx context.Context, startKey []byte, endKey []byte, limit int) (*GetResult, error) {
+	ctx, span := s.tr.Start(ctx,
+		"GetRange",
+		oteltrace.WithAttributes(
+			attribute.String("startKey", string(startKey)),
+			attribute.String("endKey", string(endKey)),
+			attribute.Int("limit", limit),
+		),
+	)
+	defer span.End()
+
 	if err := s.GetReadError(); err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -67,22 +83,55 @@ func (s *Wrapper) GetRange(ctx context.Context, startKey []byte, endKey []byte, 
 
 // Create creates item if it does not exist
 func (s *Wrapper) Create(ctx context.Context, i Item) (*Lease, error) {
+	ctx, span := s.tr.Start(
+		ctx,
+		"Create",
+		oteltrace.WithAttributes(
+			attribute.String("key", string(i.Key)),
+		),
+	)
+	defer span.End()
+
 	return s.backend.Create(ctx, i)
 }
 
 // Put puts value into backend (creates if it does not
 // exists, updates it otherwise)
 func (s *Wrapper) Put(ctx context.Context, i Item) (*Lease, error) {
+	ctx, span := s.tr.Start(ctx,
+		"Put",
+		oteltrace.WithAttributes(
+			attribute.String("key", string(i.Key)),
+		),
+	)
+	defer span.End()
+
 	return s.backend.Put(ctx, i)
 }
 
 // Update updates value in the backend
 func (s *Wrapper) Update(ctx context.Context, i Item) (*Lease, error) {
+	ctx, span := s.tr.Start(ctx,
+		"Update",
+		oteltrace.WithAttributes(
+			attribute.String("key", string(i.Key)),
+		),
+	)
+	defer span.End()
+
 	return s.backend.Update(ctx, i)
 }
 
 // Get returns a single item or not found error
 func (s *Wrapper) Get(ctx context.Context, key []byte) (*Item, error) {
+	ctx, span := s.tr.Start(ctx,
+		"Get",
+		oteltrace.WithAttributes(
+			attribute.String("key", string(key)),
+		),
+	)
+	defer span.End()
+
 	if err := s.GetReadError(); err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -92,16 +141,42 @@ func (s *Wrapper) Get(ctx context.Context, key []byte) (*Item, error) {
 // CompareAndSwap compares item with existing item
 // and replaces is with replaceWith item
 func (s *Wrapper) CompareAndSwap(ctx context.Context, expected Item, replaceWith Item) (*Lease, error) {
+	ctx, span := s.tr.Start(ctx,
+		"CompareAndSwap",
+		oteltrace.WithAttributes(
+			attribute.String("key", string(expected.Key)),
+		),
+	)
+	defer span.End()
+
 	return s.backend.CompareAndSwap(ctx, expected, replaceWith)
 }
 
 // Delete deletes item by key
 func (s *Wrapper) Delete(ctx context.Context, key []byte) error {
+	ctx, span := s.tr.Start(ctx,
+		"Delete",
+		oteltrace.WithAttributes(
+			attribute.String("key", string(key)),
+		),
+	)
+	defer span.End()
+
 	return s.backend.Delete(ctx, key)
 }
 
 // DeleteRange deletes range of items
 func (s *Wrapper) DeleteRange(ctx context.Context, startKey []byte, endKey []byte) error {
+	ctx, span := s.tr.Start(
+		ctx,
+		"DeleteRange",
+		oteltrace.WithAttributes(
+			attribute.String("startKey", string(startKey)),
+			attribute.String("endKey", string(endKey)),
+		),
+	)
+	defer span.End()
+
 	return s.backend.DeleteRange(ctx, startKey, endKey)
 }
 
@@ -110,11 +185,24 @@ func (s *Wrapper) DeleteRange(ctx context.Context, startKey []byte, endKey []byt
 // some backends may ignore expires based on the implementation
 // in case if the lease managed server side
 func (s *Wrapper) KeepAlive(ctx context.Context, lease Lease, expires time.Time) error {
+	ctx, span := s.tr.Start(
+		ctx,
+		"KeepAlive",
+		oteltrace.WithAttributes(
+			attribute.String("key", string(lease.Key)),
+			attribute.String("expires", expires.String()),
+		),
+	)
+	defer span.End()
+
 	return s.backend.KeepAlive(ctx, lease, expires)
 }
 
 // NewWatcher returns a new event watcher
 func (s *Wrapper) NewWatcher(ctx context.Context, watch Watch) (Watcher, error) {
+	ctx, span := s.tr.Start(ctx, "NewWatcher")
+	defer span.End()
+
 	if err := s.GetReadError(); err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -138,4 +226,9 @@ func (s *Wrapper) Clock() clockwork.Clock {
 }
 
 // Migrate runs the necessary data migrations for this backend.
-func (s *Wrapper) Migrate(ctx context.Context) error { return s.backend.Migrate(ctx) }
+func (s *Wrapper) Migrate(ctx context.Context) error {
+	ctx, span := s.tr.Start(ctx, "Migrate")
+	defer span.End()
+
+	return s.backend.Migrate(ctx)
+}

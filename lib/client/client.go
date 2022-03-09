@@ -19,6 +19,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -29,6 +30,9 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	oteltrace "go.opentelemetry.io/otel/trace"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 
@@ -60,6 +64,7 @@ type ProxyClient struct {
 	authMethods     []ssh.AuthMethod
 	siteName        string
 	clientAddr      string
+	tr              oteltrace.Tracer
 }
 
 // NodeClient implements ssh client to a ssh node (teleport or any regular ssh node)
@@ -71,11 +76,29 @@ type NodeClient struct {
 	TC        *TeleportClient
 }
 
+func (proxy *ProxyClient) NewSession(ctx context.Context) (*ssh.Session, error) {
+	session, err := proxy.Client.NewSession()
+	if err != nil {
+		return nil, err
+	}
+
+	carrier := propagation.MapCarrier{}
+	otel.GetTextMapPropagator().Inject(ctx, &carrier)
+	raw, err := json.Marshal(carrier)
+	if err == nil {
+		if err := session.Setenv(sshutils.TraceContextVar, base64.StdEncoding.EncodeToString(raw)); err != nil {
+			log.Error(err)
+		}
+	}
+
+	return session, nil
+}
+
 // GetSites returns list of the "sites" (AKA teleport clusters) connected to the proxy
 // Each site is returned as an instance of its auth server
 //
-func (proxy *ProxyClient) GetSites() ([]types.Site, error) {
-	proxySession, err := proxy.Client.NewSession()
+func (proxy *ProxyClient) GetSites(ctx context.Context) ([]types.Site, error) {
+	proxySession, err := proxy.NewSession(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -630,7 +653,7 @@ func (proxy *ProxyClient) GetDatabaseServers(ctx context.Context, namespace stri
 // and could be cached based on the access policy
 func (proxy *ProxyClient) CurrentClusterAccessPoint(ctx context.Context, quiet bool) (auth.AccessPoint, error) {
 	// get the current cluster:
-	cluster, err := proxy.currentCluster()
+	cluster, err := proxy.currentCluster(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -656,7 +679,7 @@ func (proxy *ProxyClient) ClusterAccessPoint(ctx context.Context, clusterName st
 // if 'quiet' is set to true, no errors will be printed to stdout, otherwise
 // any connection errors are visible to a user.
 func (proxy *ProxyClient) ConnectToCurrentCluster(ctx context.Context, quiet bool) (auth.ClientI, error) {
-	cluster, err := proxy.currentCluster()
+	cluster, err := proxy.currentCluster(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -790,7 +813,7 @@ func (proxy *ProxyClient) dialAuthServer(ctx context.Context, clusterName string
 		return nil, trace.Wrap(err)
 	}
 
-	proxySession, err := proxy.Client.NewSession()
+	proxySession, err := proxy.NewSession(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -908,7 +931,7 @@ func (proxy *ProxyClient) ConnectToNode(ctx context.Context, nodeAddress NodeAdd
 		return nil, trace.Wrap(err)
 	}
 
-	proxySession, err := proxy.Client.NewSession()
+	proxySession, err := proxy.NewSession(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -1161,6 +1184,24 @@ func (proxy *ProxyClient) Close() error {
 	return proxy.Client.Close()
 }
 
+func (c *NodeClient) NewSession(ctx context.Context) (*ssh.Session, error) {
+	session, err := c.Client.NewSession()
+	if err != nil {
+		return nil, err
+	}
+
+	carrier := propagation.MapCarrier{}
+	otel.GetTextMapPropagator().Inject(ctx, &carrier)
+	raw, err := json.Marshal(carrier)
+	if err == nil {
+		if err := session.Setenv(sshutils.TraceContextVar, base64.StdEncoding.EncodeToString(raw)); err != nil {
+			log.Error(err)
+		}
+	}
+
+	return session, nil
+}
+
 // ExecuteSCP runs remote scp command(shellCmd) on the remote server and
 // runs local scp handler using SCP Command
 func (c *NodeClient) ExecuteSCP(ctx context.Context, cmd scp.Command) error {
@@ -1169,7 +1210,7 @@ func (c *NodeClient) ExecuteSCP(ctx context.Context, cmd scp.Command) error {
 		return trace.Wrap(err)
 	}
 
-	s, err := c.Client.NewSession()
+	s, err := c.NewSession(ctx)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -1406,8 +1447,8 @@ func (c *NodeClient) Close() error {
 }
 
 // currentCluster returns the connection to the API of the current cluster
-func (proxy *ProxyClient) currentCluster() (*types.Site, error) {
-	sites, err := proxy.GetSites()
+func (proxy *ProxyClient) currentCluster(ctx context.Context) (*types.Site, error) {
+	sites, err := proxy.GetSites(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -32,6 +33,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gravitational/teleport/tracing"
+	"go.opentelemetry.io/otel"
+	oteltrace "go.opentelemetry.io/otel/trace"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 
@@ -68,6 +72,14 @@ import (
 var log = logrus.WithFields(logrus.Fields{
 	trace.Component: teleport.ComponentTSH,
 })
+
+type ExitCodeError struct {
+	Code int
+}
+
+func (e ExitCodeError) Error() string {
+	return fmt.Sprintf("Exit code: %d", e.Code)
+}
 
 // CLIConf stores command line arguments and flags:
 type CLIConf struct {
@@ -247,6 +259,8 @@ type CLIConf struct {
 
 	// ConfigProxyTarget is the node which should be connected to in `tsh config-proxy`.
 	ConfigProxyTarget string
+
+	Tracer oteltrace.Tracer
 }
 
 func main() {
@@ -264,6 +278,11 @@ func main() {
 		cmdLine = cmdLineOrig
 	}
 	if err := Run(cmdLine); err != nil {
+		var codeError ExitCodeError
+		if errors.As(err, &codeError) {
+			os.Exit(codeError.Code)
+		}
+
 		utils.FatalError(err)
 	}
 }
@@ -571,6 +590,22 @@ func Run(args []string, opts ...cliOption) error {
 	}
 
 	setEnvFlags(&cf, os.Getenv)
+
+	shutdown, err := tracing.InitializeTraceProvider(cf.Context,
+		tracing.Config{
+			Service:     "tsh",
+			AgentAddr:   "172.16.27.131:4317",
+			SampleRatio: 1.0,
+		})
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	defer shutdown(cf.Context)
+	cf.Tracer = otel.GetTracerProvider().Tracer("tsh", oteltrace.WithInstrumentationVersion(teleport.Version))
+
+	ctx, span := cf.Tracer.Start(cf.Context, command)
+	defer span.End()
+	cf.Context = ctx
 
 	switch command {
 	case ver.FullCommand():
@@ -1081,7 +1116,7 @@ func onLogout(cf *CLIConf) error {
 		if err != nil {
 			if trace.IsNotFound(err) {
 				fmt.Printf("User %v already logged out from %v.\n", cf.Username, proxyHost)
-				os.Exit(1)
+				return trace.Wrap(ExitCodeError{Code: 1})
 			}
 			return trace.Wrap(err)
 		}
@@ -1559,12 +1594,12 @@ func onSSH(cf *CLIConf) error {
 			fmt.Fprintf(os.Stderr, "Hint: try addressing the node by unique id (ex: tsh ssh user@node-id)\n")
 			fmt.Fprintf(os.Stderr, "Hint: use 'tsh ls -v' to list all nodes with their unique ids\n")
 			fmt.Fprintf(os.Stderr, "\n")
-			os.Exit(1)
+			return trace.Wrap(ExitCodeError{Code: 1})
 		}
 		// exit with the same exit status as the failed command:
 		if tc.ExitStatus != 0 {
 			fmt.Fprintln(os.Stderr, utils.UserMessageFromError(err))
-			os.Exit(tc.ExitStatus)
+			return trace.Wrap(ExitCodeError{Code: tc.ExitStatus})
 		} else {
 			return trace.Wrap(err)
 		}
@@ -1586,7 +1621,7 @@ func onBenchmark(cf *CLIConf) error {
 	result, err := cnf.Benchmark(cf.Context, tc)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, utils.UserMessageFromError(err))
-		os.Exit(255)
+		return trace.Wrap(ExitCodeError{Code: 255})
 	}
 	fmt.Printf("\n")
 	fmt.Printf("* Requests originated: %v\n", result.RequestsOriginated)
@@ -1654,7 +1689,7 @@ func onSCP(cf *CLIConf) error {
 	// exit with the same exit status as the failed command:
 	if tc.ExitStatus != 0 {
 		fmt.Fprintln(os.Stderr, utils.UserMessageFromError(err))
-		os.Exit(tc.ExitStatus)
+		return trace.Wrap(ExitCodeError{Code: tc.ExitStatus})
 	}
 	return trace.Wrap(err)
 }

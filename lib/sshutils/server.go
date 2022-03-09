@@ -110,6 +110,8 @@ const (
 	// TrueClientAddrVar environment variable is used by the web UI to pass
 	// the remote IP (user's IP) from the browser/HTTP session into an SSH session
 	TrueClientAddrVar = "TELEPORT_CLIENT_ADDR"
+
+	TraceContextVar = "TELEPORT_TRACE_CONTEXT"
 )
 
 // ServerOption is a functional argument for server

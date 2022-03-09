@@ -574,7 +574,7 @@ type IAuditLog interface {
 
 	// EmitAuditEventLegacy emits audit in legacy format
 	// DELETE IN: 5.0.0
-	EmitAuditEventLegacy(Event, EventFields) error
+	EmitAuditEventLegacy(context.Context, Event, EventFields) error
 
 	// EmitAuditEvent emits audit event
 	EmitAuditEvent(context.Context, apievents.AuditEvent) error
@@ -583,17 +583,17 @@ type IAuditLog interface {
 	// This method is no longer necessary as nodes and proxies >= 2.7.0
 	// use UploadSessionRecording method.
 	// PostSessionSlice sends chunks of recorded session to the event log
-	PostSessionSlice(SessionSlice) error
+	PostSessionSlice(context.Context, SessionSlice) error
 
 	// UploadSessionRecording uploads session recording to the audit server
-	UploadSessionRecording(r SessionRecording) error
+	UploadSessionRecording(ctx context.Context, r SessionRecording) error
 
 	// GetSessionChunk returns a reader which can be used to read a byte stream
 	// of a recorded session starting from 'offsetBytes' (pass 0 to start from the
 	// beginning) up to maxBytes bytes.
 	//
 	// If maxBytes > MaxChunkBytes, it gets rounded down to MaxChunkBytes
-	GetSessionChunk(namespace string, sid session.ID, offsetBytes, maxBytes int) ([]byte, error)
+	GetSessionChunk(ctx context.Context, namespace string, sid session.ID, offsetBytes, maxBytes int) ([]byte, error)
 
 	// Returns all events that happen during a session sorted by time
 	// (oldest first).
@@ -602,7 +602,7 @@ type IAuditLog interface {
 	//
 	// This function is usually used in conjunction with GetSessionReader to
 	// replay recorded session streams.
-	GetSessionEvents(namespace string, sid session.ID, after int, includePrintEvents bool) ([]EventFields, error)
+	GetSessionEvents(ctx context.Context, namespace string, sid session.ID, after int, includePrintEvents bool) ([]EventFields, error)
 
 	// SearchEvents is a flexible way to find events.
 	//
@@ -612,7 +612,7 @@ type IAuditLog interface {
 	// The only mandatory requirement is a date range (UTC).
 	//
 	// This function may never return more than 1 MiB of event data.
-	SearchEvents(fromUTC, toUTC time.Time, namespace string, eventTypes []string, limit int, order types.EventOrder, startKey string) ([]apievents.AuditEvent, string, error)
+	SearchEvents(ctx context.Context, fromUTC, toUTC time.Time, namespace string, eventTypes []string, limit int, order types.EventOrder, startKey string) ([]apievents.AuditEvent, string, error)
 
 	// SearchSessionEvents is a flexible way to find session events.
 	// Only session events are returned by this function.
@@ -622,7 +622,7 @@ type IAuditLog interface {
 	// a query to be resumed.
 	//
 	// This function may never return more than 1 MiB of event data.
-	SearchSessionEvents(fromUTC time.Time, toUTC time.Time, limit int, order types.EventOrder, startKey string) ([]apievents.AuditEvent, string, error)
+	SearchSessionEvents(ctx context.Context, fromUTC time.Time, toUTC time.Time, limit int, order types.EventOrder, startKey string) ([]apievents.AuditEvent, string, error)
 
 	// WaitForDelivery waits for resources to be released and outstanding requests to
 	// complete after calling Close method

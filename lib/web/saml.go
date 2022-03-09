@@ -39,6 +39,7 @@ func (h *Handler) samlSSO(w http.ResponseWriter, r *http.Request, p httprouter.P
 	}
 
 	response, err := h.cfg.ProxyClient.CreateSAMLAuthRequest(
+		r.Context(),
 		services.SAMLAuthRequest{
 			ConnectorID:       req.connectorID,
 			CSRFToken:         req.csrfToken,
@@ -69,6 +70,7 @@ func (h *Handler) samlSSOConsole(w http.ResponseWriter, r *http.Request, p httpr
 	}
 
 	response, err := h.cfg.ProxyClient.CreateSAMLAuthRequest(
+		r.Context(),
 		services.SAMLAuthRequest{
 			ConnectorID:       req.ConnectorID,
 			ClientRedirectURL: req.RedirectURL,
@@ -96,7 +98,7 @@ func (h *Handler) samlACS(w http.ResponseWriter, r *http.Request, p httprouter.P
 		return client.LoginFailedRedirectURL
 	}
 
-	response, err := h.cfg.ProxyClient.ValidateSAMLResponse(samlResponse)
+	response, err := h.cfg.ProxyClient.ValidateSAMLResponse(r.Context(), samlResponse)
 	if err != nil {
 		logger.WithError(err).Error("Error while processing callback.")
 		return client.LoginFailedBadCallbackRedirectURL

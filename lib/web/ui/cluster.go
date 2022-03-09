@@ -97,7 +97,7 @@ func GetClusterDetails(ctx context.Context, site reversetunnel.RemoteSite, opts 
 		return nil, trace.Wrap(err)
 	}
 
-	proxies, err := clt.GetProxies()
+	proxies, err := clt.GetProxies(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -106,7 +106,7 @@ func GetClusterDetails(ctx context.Context, site reversetunnel.RemoteSite, opts 
 		return nil, trace.Wrap(err)
 	}
 
-	authServers, err := clt.GetAuthServers()
+	authServers, err := clt.GetAuthServers(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

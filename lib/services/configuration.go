@@ -26,22 +26,22 @@ import (
 // the resources modified by this interface can only have a single instance
 // in the backend.
 type ClusterConfiguration interface {
-	// SetClusterName gets services.ClusterName from the backend.
-	GetClusterName(opts ...MarshalOption) (types.ClusterName, error)
+	// GetClusterName gets services.ClusterName from the backend.
+	GetClusterName(ctx context.Context, opts ...MarshalOption) (types.ClusterName, error)
 	// SetClusterName sets services.ClusterName on the backend.
-	SetClusterName(types.ClusterName) error
+	SetClusterName(context.Context, types.ClusterName) error
 	// UpsertClusterName upserts cluster name
-	UpsertClusterName(types.ClusterName) error
+	UpsertClusterName(context.Context, types.ClusterName) error
 
 	// DeleteClusterName deletes cluster name resource
-	DeleteClusterName() error
+	DeleteClusterName(ctx context.Context) error
 
 	// GetStaticTokens gets services.StaticTokens from the backend.
-	GetStaticTokens() (types.StaticTokens, error)
+	GetStaticTokens(ctx context.Context) (types.StaticTokens, error)
 	// SetStaticTokens sets services.StaticTokens on the backend.
-	SetStaticTokens(types.StaticTokens) error
+	SetStaticTokens(context.Context, types.StaticTokens) error
 	// DeleteStaticTokens deletes static tokens resource
-	DeleteStaticTokens() error
+	DeleteStaticTokens(ctx context.Context) error
 
 	// GetAuthPreference gets types.AuthPreference from the backend.
 	GetAuthPreference(context.Context) (types.AuthPreference, error)
@@ -59,11 +59,11 @@ type ClusterConfiguration interface {
 
 	// DELETE IN 8.0.0: ClusterConfig and all related methods.
 	// GetClusterConfig gets services.ClusterConfig from the backend.
-	GetClusterConfig(opts ...MarshalOption) (types.ClusterConfig, error)
+	GetClusterConfig(ctx context.Context, opts ...MarshalOption) (types.ClusterConfig, error)
 	// SetClusterConfig sets services.ClusterConfig on the backend.
-	SetClusterConfig(types.ClusterConfig) error
+	SetClusterConfig(context.Context, types.ClusterConfig) error
 	// DeleteClusterConfig deletes cluster config resource
-	DeleteClusterConfig() error
+	DeleteClusterConfig(ctx context.Context) error
 
 	// GetClusterAuditConfig gets ClusterAuditConfig from the backend.
 	GetClusterAuditConfig(context.Context, ...MarshalOption) (types.ClusterAuditConfig, error)

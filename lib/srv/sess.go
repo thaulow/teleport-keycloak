@@ -367,7 +367,7 @@ func (s *SessionRegistry) leaveSession(party *party) error {
 
 		// Remove the session from the backend.
 		if s.srv.GetSessionServer() != nil {
-			err := s.srv.GetSessionServer().DeleteSession(s.srv.GetNamespace(), sess.id)
+			err := s.srv.GetSessionServer().DeleteSession(context.TODO(), s.srv.GetNamespace(), sess.id)
 			if err != nil {
 				s.log.Errorf("Failed to remove active session: %v: %v. "+
 					"Access to backend may be degraded, check connectivity to backend.",
@@ -560,12 +560,12 @@ func newSession(id rsession.ID, r *SessionRegistry, ctx *ServerContext) (*sessio
 	// be returned here.
 	sessionServer := r.srv.GetSessionServer()
 
-	err := sessionServer.CreateSession(rsess)
+	err := sessionServer.CreateSession(context.TODO(), rsess)
 	if err != nil {
 		if trace.IsAlreadyExists(err) {
 			// if session already exists, make sure they are compatible
 			// Login matches existing login
-			existing, err := sessionServer.GetSession(r.srv.GetNamespace(), id)
+			existing, err := sessionServer.GetSession(context.TODO(), r.srv.GetNamespace(), id)
 			if err != nil {
 				return nil, trace.Wrap(err)
 			}
@@ -1019,7 +1019,7 @@ func (s *session) startExec(channel ssh.Channel, ctx *ServerContext) error {
 
 		// Remove the session from the backend.
 		if ctx.srv.GetSessionServer() != nil {
-			err := ctx.srv.GetSessionServer().DeleteSession(ctx.srv.GetNamespace(), s.id)
+			err := ctx.srv.GetSessionServer().DeleteSession(context.TODO(), ctx.srv.GetNamespace(), s.id)
 			if err != nil {
 				ctx.Errorf("Failed to remove active session: %v: %v. "+
 					"Access to backend may be degraded, check connectivity to backend.",
@@ -1171,7 +1171,7 @@ func (s *session) heartbeat(ctx *ServerContext) {
 		case <-tickerCh.C:
 			partyList := s.exportPartyMembers()
 
-			err := sessionServer.UpdateSession(rsession.UpdateRequest{
+			err := sessionServer.UpdateSession(context.TODO(), rsession.UpdateRequest{
 				Namespace: s.getNamespace(),
 				ID:        s.id,
 				Parties:   &partyList,

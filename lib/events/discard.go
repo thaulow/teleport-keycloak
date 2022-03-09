@@ -41,25 +41,25 @@ func (d *DiscardAuditLog) WaitForDelivery(context.Context) error {
 func (d *DiscardAuditLog) Close() error {
 	return nil
 }
-func (d *DiscardAuditLog) EmitAuditEventLegacy(event Event, fields EventFields) error {
+func (d *DiscardAuditLog) EmitAuditEventLegacy(ctx context.Context, event Event, fields EventFields) error {
 	return nil
 }
-func (d *DiscardAuditLog) PostSessionSlice(SessionSlice) error {
+func (d *DiscardAuditLog) PostSessionSlice(context.Context, SessionSlice) error {
 	return nil
 }
-func (d *DiscardAuditLog) GetSessionChunk(namespace string, sid session.ID, offsetBytes, maxBytes int) ([]byte, error) {
+func (d *DiscardAuditLog) GetSessionChunk(ctx context.Context, namespace string, sid session.ID, offsetBytes, maxBytes int) ([]byte, error) {
 	return make([]byte, 0), nil
 }
-func (d *DiscardAuditLog) GetSessionEvents(namespace string, sid session.ID, after int, includePrintEvents bool) ([]EventFields, error) {
+func (d *DiscardAuditLog) GetSessionEvents(ctx context.Context, namespace string, sid session.ID, after int, includePrintEvents bool) ([]EventFields, error) {
 	return make([]EventFields, 0), nil
 }
-func (d *DiscardAuditLog) SearchEvents(fromUTC, toUTC time.Time, namespace string, eventType []string, limit int, order types.EventOrder, startKey string) ([]apievents.AuditEvent, string, error) {
+func (d *DiscardAuditLog) SearchEvents(ctx context.Context, fromUTC, toUTC time.Time, namespace string, eventType []string, limit int, order types.EventOrder, startKey string) ([]apievents.AuditEvent, string, error) {
 	return make([]apievents.AuditEvent, 0), "", nil
 }
-func (d *DiscardAuditLog) SearchSessionEvents(fromUTC time.Time, toUTC time.Time, limit int, order types.EventOrder, startKey string) ([]apievents.AuditEvent, string, error) {
+func (d *DiscardAuditLog) SearchSessionEvents(ctx context.Context, fromUTC time.Time, toUTC time.Time, limit int, order types.EventOrder, startKey string) ([]apievents.AuditEvent, string, error) {
 	return make([]apievents.AuditEvent, 0), "", nil
 }
-func (d *DiscardAuditLog) UploadSessionRecording(SessionRecording) error {
+func (d *DiscardAuditLog) UploadSessionRecording(context.Context, SessionRecording) error {
 	return nil
 }
 func (d *DiscardAuditLog) EmitAuditEvent(ctx context.Context, event apievents.AuditEvent) error {

@@ -38,11 +38,11 @@ func (s *Server) GenerateDatabaseCert(ctx context.Context, req *proto.DatabaseCe
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	clusterName, err := s.GetClusterName()
+	clusterName, err := s.GetClusterName(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	hostCA, err := s.GetCertAuthority(types.CertAuthID{
+	hostCA, err := s.GetCertAuthority(ctx, types.CertAuthID{
 		Type:       types.HostCA,
 		DomainName: clusterName.GetClusterName(),
 	}, true)
@@ -89,12 +89,12 @@ func (s *Server) SignDatabaseCSR(ctx context.Context, req *proto.DatabaseCSRRequ
 
 	log.Debugf("Signing database CSR for cluster %v.", req.ClusterName)
 
-	clusterName, err := s.GetClusterName()
+	clusterName, err := s.GetClusterName(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
-	hostCA, err := s.GetCertAuthority(types.CertAuthID{
+	hostCA, err := s.GetCertAuthority(ctx, types.CertAuthID{
 		Type:       types.HostCA,
 		DomainName: req.ClusterName,
 	}, false)
@@ -136,7 +136,7 @@ func (s *Server) SignDatabaseCSR(ctx context.Context, req *proto.DatabaseCSRRequ
 	ttl := roles.AdjustSessionTTL(apidefaults.CertDuration)
 
 	// Generate the TLS certificate.
-	userCA, err := s.Trust.GetCertAuthority(types.CertAuthID{
+	userCA, err := s.Trust.GetCertAuthority(ctx, types.CertAuthID{
 		Type:       types.UserCA,
 		DomainName: clusterName.GetClusterName(),
 	}, true)

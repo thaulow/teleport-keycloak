@@ -59,8 +59,8 @@ type (
 type AuthenticationStorage interface {
 	DeviceStorage
 
-	UpsertU2FSignChallenge(user string, c *Challenge) error
-	GetU2FSignChallenge(user string) (*Challenge, error)
+	UpsertU2FSignChallenge(ctx context.Context, user string, c *Challenge) error
+	GetU2FSignChallenge(ctx context.Context, user string) (*Challenge, error)
 }
 
 const (
@@ -88,11 +88,11 @@ func InMemoryAuthenticationStorage(ds DeviceStorage) (AuthenticationStorage, err
 	return inMemoryAuthenticationStorage{DeviceStorage: ds, challenges: m}, nil
 }
 
-func (s inMemoryAuthenticationStorage) UpsertU2FSignChallenge(user string, c *Challenge) error {
+func (s inMemoryAuthenticationStorage) UpsertU2FSignChallenge(ctx context.Context, user string, c *Challenge) error {
 	return s.challenges.Set(user, c, inMemoryChallengeTTL)
 }
 
-func (s inMemoryAuthenticationStorage) GetU2FSignChallenge(user string) (*Challenge, error) {
+func (s inMemoryAuthenticationStorage) GetU2FSignChallenge(ctx context.Context, user string) (*Challenge, error) {
 	v, ok := s.challenges.Get(user)
 	if !ok {
 		return nil, trace.NotFound("U2F challenge not found or expired")
@@ -125,7 +125,7 @@ func AuthenticateInit(ctx context.Context, params AuthenticateInitParams) ([]*Au
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	if err = params.Storage.UpsertU2FSignChallenge(params.StorageKey, challenge); err != nil {
+	if err = params.Storage.UpsertU2FSignChallenge(ctx, params.StorageKey, challenge); err != nil {
 		return nil, trace.Wrap(err)
 	}
 
@@ -259,7 +259,7 @@ func AuthenticateVerify(ctx context.Context, params AuthenticateVerifyParams) er
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	challenge, err := params.Storage.GetU2FSignChallenge(params.StorageKey)
+	challenge, err := params.Storage.GetU2FSignChallenge(ctx, params.StorageKey)
 	if err != nil {
 		return trace.Wrap(err)
 	}

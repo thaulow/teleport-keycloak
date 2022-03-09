@@ -264,7 +264,7 @@ func (t *TLSServer) GetConfigForClient(info *tls.ClientHelloInfo) (*tls.Config, 
 	pool, err := ClientCertPool(t.cfg.AccessPoint, clusterName)
 	if err != nil {
 		var ourClusterName string
-		if clusterName, err := t.cfg.AccessPoint.GetClusterName(); err == nil {
+		if clusterName, err := t.cfg.AccessPoint.GetClusterName(info.Context()); err == nil {
 			ourClusterName = clusterName.GetClusterName()
 		}
 		t.log.Errorf("Failed to retrieve client pool. Client cluster %v, target cluster %v, error:  %v.", clusterName, ourClusterName, trace.DebugReport(err))
@@ -347,7 +347,7 @@ func (a *Middleware) UnaryInterceptor(ctx context.Context, req interface{}, info
 	if !ok {
 		return nil, trace.AccessDenied("missing authentication")
 	}
-	user, err := a.GetUser(tlsInfo.State)
+	user, err := a.GetUser(ctx, tlsInfo.State)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -378,7 +378,7 @@ func (a *Middleware) StreamInterceptor(srv interface{}, serverStream grpc.Server
 	if !ok {
 		return trace.AccessDenied("missing authentication")
 	}
-	user, err := a.GetUser(tlsInfo.State)
+	user, err := a.GetUser(serverStream.Context(), tlsInfo.State)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -398,14 +398,14 @@ func (a *authenticatedStream) Context() context.Context {
 }
 
 // GetUser returns authenticated user based on request metadata set by HTTP server
-func (a *Middleware) GetUser(connState tls.ConnectionState) (IdentityGetter, error) {
+func (a *Middleware) GetUser(ctx context.Context, connState tls.ConnectionState) (IdentityGetter, error) {
 	peers := connState.PeerCertificates
 	if len(peers) > 1 {
 		// when turning intermediaries on, don't forget to verify
 		// https://github.com/kubernetes/kubernetes/pull/34524/files#diff-2b283dde198c92424df5355f39544aa4R59
 		return nil, trace.AccessDenied("access denied: intermediaries are not supported")
 	}
-	localClusterName, err := a.AccessPoint.GetClusterName()
+	localClusterName, err := a.AccessPoint.GetClusterName(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -519,29 +519,26 @@ func findSystemRole(roles []string) *types.SystemRole {
 
 // ServeHTTP serves HTTP requests
 func (a *Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	baseContext := r.Context()
-	if baseContext == nil {
-		baseContext = context.TODO()
-	}
+
 	if r.TLS == nil {
 		trace.WriteError(w, trace.AccessDenied("missing authentication"))
 		return
 	}
-	user, err := a.GetUser(*r.TLS)
+	user, err := a.GetUser(r.Context(), *r.TLS)
 	if err != nil {
 		trace.WriteError(w, err)
 		return
 	}
 
 	// determine authenticated user based on the request parameters
-	requestWithContext := r.WithContext(context.WithValue(baseContext, ContextUser, user))
+	requestWithContext := r.WithContext(context.WithValue(r.Context(), ContextUser, user))
 	a.Handler.ServeHTTP(w, requestWithContext)
 }
 
 // WrapContextWithUser enriches the provided context with the identity information
 // extracted from the provided TLS connection.
 func (a *Middleware) WrapContextWithUser(ctx context.Context, conn *tls.Conn) (context.Context, error) {
-	user, err := a.GetUser(conn.ConnectionState())
+	user, err := a.GetUser(ctx, conn.ConnectionState())
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -551,27 +548,28 @@ func (a *Middleware) WrapContextWithUser(ctx context.Context, conn *tls.Conn) (c
 
 // ClientCertPool returns trusted x509 cerificate authority pool
 func ClientCertPool(client AccessCache, clusterName string) (*x509.CertPool, error) {
+	ctx := context.TODO()
 	pool := x509.NewCertPool()
 	var authorities []types.CertAuthority
 	if clusterName == "" {
-		hostCAs, err := client.GetCertAuthorities(types.HostCA, false)
+		hostCAs, err := client.GetCertAuthorities(ctx, types.HostCA, false)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
-		userCAs, err := client.GetCertAuthorities(types.UserCA, false)
+		userCAs, err := client.GetCertAuthorities(ctx, types.UserCA, false)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
 		authorities = append(authorities, hostCAs...)
 		authorities = append(authorities, userCAs...)
 	} else {
-		hostCA, err := client.GetCertAuthority(
+		hostCA, err := client.GetCertAuthority(ctx,
 			types.CertAuthID{Type: types.HostCA, DomainName: clusterName},
 			false)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
-		userCA, err := client.GetCertAuthority(
+		userCA, err := client.GetCertAuthority(ctx,
 			types.CertAuthID{Type: types.UserCA, DomainName: clusterName},
 			false)
 		if err != nil {

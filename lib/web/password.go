@@ -61,7 +61,7 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request, p httpr
 		U2FSignResponse:   req.U2FSignResponse,
 	}
 
-	if err := clt.ChangePassword(servicedReq); err != nil {
+	if err := clt.ChangePassword(r.Context(), servicedReq); err != nil {
 		return nil, trace.Wrap(err)
 	}
 
@@ -80,7 +80,7 @@ func (h *Handler) u2fChangePasswordRequest(w http.ResponseWriter, r *http.Reques
 		return nil, trace.Wrap(err)
 	}
 
-	u2fReq, err := clt.GetMFAAuthenticateChallenge(ctx.GetUser(), []byte(req.Pass))
+	u2fReq, err := clt.GetMFAAuthenticateChallenge(r.Context(), ctx.GetUser(), []byte(req.Pass))
 	if err != nil && trace.IsAccessDenied(err) {
 		// logout in case of access denied
 		logoutErr := h.logout(w, ctx)

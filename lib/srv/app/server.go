@@ -233,7 +233,7 @@ func New(ctx context.Context, c *Config) (*Server, error) {
 	s.keepAlive = netConfig.GetKeepAliveInterval()
 
 	// Figure out the port the proxy is running on.
-	s.proxyPort = s.getProxyPort()
+	s.proxyPort = s.getProxyPort(ctx)
 
 	return s, nil
 }
@@ -492,8 +492,8 @@ func (s *Server) newHTTPServer() *http.Server {
 }
 
 // getProxyPort tries to figure out the address the proxy is running at.
-func (s *Server) getProxyPort() string {
-	servers, err := s.c.AccessPoint.GetProxies()
+func (s *Server) getProxyPort(ctx context.Context) string {
+	servers, err := s.c.AccessPoint.GetProxies(ctx)
 	if err != nil {
 		return strconv.Itoa(defaults.HTTPListenPort)
 	}

@@ -121,17 +121,19 @@ func (u *UserCommand) Initialize(app *kingpin.Application, config *service.Confi
 
 // TryRun takes the CLI command as an argument (like "users add") and executes it.
 func (u *UserCommand) TryRun(cmd string, client auth.ClientI) (match bool, err error) {
+	ctx := context.Background()
+
 	switch cmd {
 	case u.userAdd.FullCommand():
-		err = u.Add(client)
+		err = u.Add(ctx, client)
 	case u.userUpdate.FullCommand():
-		err = u.Update(client)
+		err = u.Update(ctx, client)
 	case u.userList.FullCommand():
-		err = u.List(client)
+		err = u.List(ctx, client)
 	case u.userDelete.FullCommand():
-		err = u.Delete(client)
+		err = u.Delete(ctx, client)
 	case u.userResetPassword.FullCommand():
-		err = u.ResetPassword(client)
+		err = u.ResetPassword(ctx, client)
 	default:
 		return false, nil
 	}
@@ -139,13 +141,13 @@ func (u *UserCommand) TryRun(cmd string, client auth.ClientI) (match bool, err e
 }
 
 // ResetPassword resets user password and generates a token to setup new password
-func (u *UserCommand) ResetPassword(client auth.ClientI) error {
+func (u *UserCommand) ResetPassword(ctx context.Context, client auth.ClientI) error {
 	req := auth.CreateResetPasswordTokenRequest{
 		Name: u.login,
 		TTL:  u.ttl,
 		Type: auth.ResetPasswordTokenTypePassword,
 	}
-	token, err := client.CreateResetPasswordToken(context.TODO(), req)
+	token, err := client.CreateResetPasswordToken(ctx, req)
 	if err != nil {
 		return err
 	}
@@ -204,7 +206,7 @@ func (u *UserCommand) printResetPasswordToken(token types.ResetPasswordToken, fo
 
 // Add implements `tctl users add` for the enterprise edition. Unlike the OSS
 // version, this one requires --roles flag to be set
-func (u *UserCommand) Add(client auth.ClientI) error {
+func (u *UserCommand) Add(ctx context.Context, client auth.ClientI) error {
 	// DELETE IN (7.x)
 	// Delete these legacy flags after OSS migration to RBAC.
 	if modules.GetModules().BuildType() == modules.BuildOSS {
@@ -215,13 +217,13 @@ func (u *UserCommand) Add(client auth.ClientI) error {
 				return trace.BadParameter(
 					`please use --roles and --logins flags instead of deprecated positional arguments.`)
 			}
-			return u.legacyAdd(client)
+			return u.legacyAdd(ctx, client)
 
 			// This is a legacy OSS scenario: `tctl users add bob`
 			// with no other arguments. In this case, CLI assumed allowed logins
 			// to be `bob` as well.
 		case len(u.allowedLogins) == 0 && len(u.createRoles) == 0:
-			return u.legacyAdd(client)
+			return u.legacyAdd(ctx, client)
 		}
 	}
 
@@ -238,7 +240,7 @@ func (u *UserCommand) Add(client auth.ClientI) error {
 
 	// Validate roles (server does not do this yet).
 	for _, roleName := range u.createRoles {
-		if _, err := client.GetRole(context.TODO(), roleName); err != nil {
+		if _, err := client.GetRole(ctx, roleName); err != nil {
 			return trace.Wrap(err)
 		}
 	}
@@ -257,12 +259,12 @@ func (u *UserCommand) Add(client auth.ClientI) error {
 	user.SetTraits(traits)
 	user.SetRoles(u.createRoles)
 
-	if err := client.CreateUser(context.TODO(), user); err != nil {
+	if err := client.CreateUser(ctx, user); err != nil {
 		return trace.Wrap(err)
 
 	}
 
-	token, err := client.CreateResetPasswordToken(context.TODO(), auth.CreateResetPasswordTokenRequest{
+	token, err := client.CreateResetPasswordToken(ctx, auth.CreateResetPasswordTokenRequest{
 		Name: u.login,
 		TTL:  u.ttl,
 		Type: auth.ResetPasswordTokenTypeInvite,
@@ -281,7 +283,7 @@ func (u *UserCommand) Add(client auth.ClientI) error {
 // addLegacy creates a new sign-up token and prints a token URL to stdout.
 // A user is not created until they visit the sign-up URL and completes the
 // process
-func (u *UserCommand) legacyAdd(client auth.ClientI) error {
+func (u *UserCommand) legacyAdd(ctx context.Context, client auth.ClientI) error {
 	fmt.Printf(`NOTE: Teleport 6.0 added RBAC in Open Source edition.
 
 In the future, please create a role and use a new format with --roles flag:
@@ -315,12 +317,12 @@ Meanwhile we are going to assign user %q to role %q created during migration.
 
 	user.SetTraits(traits)
 	user.AddRole(teleport.AdminRoleName)
-	err = client.CreateUser(context.TODO(), user)
+	err = client.CreateUser(ctx, user)
 	if err != nil {
 		return trace.Wrap(err)
 	}
 
-	token, err := client.CreateResetPasswordToken(context.TODO(), auth.CreateResetPasswordTokenRequest{
+	token, err := client.CreateResetPasswordToken(ctx, auth.CreateResetPasswordTokenRequest{
 		Name: u.login,
 		TTL:  u.ttl,
 		Type: auth.ResetPasswordTokenTypeInvite,
@@ -370,19 +372,19 @@ func printTokenAsText(token types.ResetPasswordToken, messageFormat string) erro
 }
 
 // Update updates existing user
-func (u *UserCommand) Update(client auth.ClientI) error {
-	user, err := client.GetUser(u.login, false)
+func (u *UserCommand) Update(ctx context.Context, client auth.ClientI) error {
+	user, err := client.GetUser(ctx, u.login, false)
 	if err != nil {
 		return trace.Wrap(err)
 	}
 	roles := flattenSlice([]string{u.updateRoles})
 	for _, role := range roles {
-		if _, err := client.GetRole(context.TODO(), role); err != nil {
+		if _, err := client.GetRole(ctx, role); err != nil {
 			return trace.Wrap(err)
 		}
 	}
 	user.SetRoles(roles)
-	if err := client.UpsertUser(user); err != nil {
+	if err := client.UpsertUser(ctx, user); err != nil {
 		return trace.Wrap(err)
 	}
 	fmt.Printf("%v has been updated with roles %v\n", user.GetName(), strings.Join(user.GetRoles(), ","))
@@ -390,8 +392,8 @@ func (u *UserCommand) Update(client auth.ClientI) error {
 }
 
 // List prints all existing user accounts
-func (u *UserCommand) List(client auth.ClientI) error {
-	users, err := client.GetUsers(false)
+func (u *UserCommand) List(ctx context.Context, client auth.ClientI) error {
+	users, err := client.GetUsers(ctx, false)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -419,9 +421,9 @@ func (u *UserCommand) List(client auth.ClientI) error {
 
 // Delete deletes teleport user(s). User IDs are passed as a comma-separated
 // list in UserCommand.login
-func (u *UserCommand) Delete(client auth.ClientI) error {
+func (u *UserCommand) Delete(ctx context.Context, client auth.ClientI) error {
 	for _, l := range strings.Split(u.login, ",") {
-		if err := client.DeleteUser(context.TODO(), l); err != nil {
+		if err := client.DeleteUser(ctx, l); err != nil {
 			return trace.Wrap(err)
 		}
 		fmt.Printf("User %q has been deleted\n", l)

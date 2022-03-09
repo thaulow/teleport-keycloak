@@ -86,9 +86,9 @@ type remoteSite struct {
 	offlineThreshold time.Duration
 }
 
-func (s *remoteSite) getRemoteClient() (auth.ClientI, bool, error) {
+func (s *remoteSite) getRemoteClient(ctx context.Context) (auth.ClientI, bool, error) {
 	// check if all cert authorities are initiated and if everything is OK
-	ca, err := s.srv.localAccessPoint.GetCertAuthority(types.CertAuthID{Type: types.HostCA, DomainName: s.domainName}, false)
+	ca, err := s.srv.localAccessPoint.GetCertAuthority(ctx, types.CertAuthID{Type: types.HostCA, DomainName: s.domainName}, false)
 	if err != nil {
 		return nil, false, trace.Wrap(err)
 	}
@@ -124,7 +124,7 @@ func (s *remoteSite) getRemoteClient() (auth.ClientI, bool, error) {
 }
 
 func (s *remoteSite) authServerContextDialer(ctx context.Context, network, address string) (net.Conn, error) {
-	return s.DialAuthServer()
+	return s.DialAuthServer(ctx)
 }
 
 // GetTunnelsCount always returns 0 for local cluster
@@ -291,7 +291,7 @@ func (s *remoteSite) registerHeartbeat(t time.Time) {
 	connInfo.SetLastHeartbeat(t)
 	connInfo.SetExpiry(s.clock.Now().Add(s.offlineThreshold))
 	s.setLastConnInfo(connInfo)
-	err := s.localAccessPoint.UpsertTunnelConnection(connInfo)
+	err := s.localAccessPoint.UpsertTunnelConnection(s.ctx, connInfo)
 	if err != nil {
 		s.Warningf("Failed to register heartbeat: %v.", err)
 	}
@@ -300,7 +300,7 @@ func (s *remoteSite) registerHeartbeat(t time.Time) {
 // deleteConnectionRecord deletes connection record to let know peer proxies
 // that this node lost the connection and needs to be discovered
 func (s *remoteSite) deleteConnectionRecord() {
-	s.localAccessPoint.DeleteTunnelConnection(s.connInfo.GetClusterName(), s.connInfo.GetName())
+	s.localAccessPoint.DeleteTunnelConnection(s.ctx, s.connInfo.GetClusterName(), s.connInfo.GetName())
 }
 
 // fanOutProxies is a non-blocking call that puts the new proxies
@@ -493,7 +493,7 @@ func (s *remoteSite) watchCertAuthorities() error {
 					continue
 				}
 
-				if err := s.remoteClient.RotateExternalCertAuthority(localCA); err != nil {
+				if err := s.remoteClient.RotateExternalCertAuthority(s.ctx, localCA); err != nil {
 					s.WithError(err).Warn("Failed to rotate external ca")
 					return trace.Wrap(err)
 				}
@@ -505,7 +505,7 @@ func (s *remoteSite) watchCertAuthorities() error {
 					continue
 				}
 
-				oldRemoteCA, err := s.localClient.GetCertAuthority(types.CertAuthID{
+				oldRemoteCA, err := s.localClient.GetCertAuthority(s.ctx, types.CertAuthID{
 					Type:       types.HostCA,
 					DomainName: remoteCA.GetClusterName(),
 				}, false)
@@ -516,7 +516,7 @@ func (s *remoteSite) watchCertAuthorities() error {
 
 				// if CA is changed or does not exist, update backend
 				if err != nil || !services.CertAuthoritiesEquivalent(oldRemoteCA, remoteCA) {
-					if err := s.localClient.UpsertCertAuthority(remoteCA); err != nil {
+					if err := s.localClient.UpsertCertAuthority(s.ctx, remoteCA); err != nil {
 						return trace.Wrap(err)
 					}
 				}
@@ -588,7 +588,7 @@ func (s *remoteSite) watchLocks() error {
 	}
 }
 
-func (s *remoteSite) DialAuthServer() (net.Conn, error) {
+func (s *remoteSite) DialAuthServer(ctx context.Context) (net.Conn, error) {
 	return s.connThroughTunnel(&sshutils.DialReq{
 		Address: constants.RemoteAuthServer,
 	})
@@ -641,7 +641,7 @@ func (s *remoteSite) dialWithAgent(params DialParams) (net.Conn, error) {
 	}
 
 	// Get a host certificate for the forwarding node from the cache.
-	hostCertificate, err := s.certificateCache.getHostCertificate(params.Address, params.Principals)
+	hostCertificate, err := s.certificateCache.getHostCertificate(s.ctx, params.Address, params.Principals)
 	if err != nil {
 		userAgent.Close()
 		return nil, trace.Wrap(err)

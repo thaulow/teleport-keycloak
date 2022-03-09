@@ -872,7 +872,7 @@ func ExtractFromCertificate(access UserGetter, cert *ssh.Certificate) ([]string,
 	// For legacy certificates, fetch roles and traits from the services.User
 	// object in the backend.
 	if isFormatOld(cert) {
-		u, err := access.GetUser(cert.KeyId, false)
+		u, err := access.GetUser(context.TODO(), cert.KeyId, false)
 		if err != nil {
 			return nil, nil, trace.Wrap(err)
 		}
@@ -903,7 +903,7 @@ func ExtractFromIdentity(access UserGetter, identity tlsca.Identity) ([]string, 
 	// For legacy certificates, fetch roles and traits from the services.User
 	// object in the backend.
 	if missingIdentity(identity) {
-		u, err := access.GetUser(identity.Username, false)
+		u, err := access.GetUser(context.TODO(), identity.Username, false)
 		if err != nil {
 			return nil, nil, trace.Wrap(err)
 		}

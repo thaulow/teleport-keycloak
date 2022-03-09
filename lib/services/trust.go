@@ -16,15 +16,19 @@ limitations under the License.
 
 package services
 
-import "github.com/gravitational/teleport/api/types"
+import (
+	"context"
+
+	"github.com/gravitational/teleport/api/types"
+)
 
 // AuthorityGetter defines interface for fetching cert authority resources.
 type AuthorityGetter interface {
 	// GetCertAuthority returns cert authority by id
-	GetCertAuthority(id types.CertAuthID, loadKeys bool, opts ...MarshalOption) (types.CertAuthority, error)
+	GetCertAuthority(ctx context.Context, id types.CertAuthID, loadKeys bool, opts ...MarshalOption) (types.CertAuthority, error)
 
 	// GetCertAuthorities returns a list of cert authorities
-	GetCertAuthorities(caType types.CertAuthType, loadKeys bool, opts ...MarshalOption) ([]types.CertAuthority, error)
+	GetCertAuthorities(ctx context.Context, caType types.CertAuthType, loadKeys bool, opts ...MarshalOption) ([]types.CertAuthority, error)
 }
 
 // Trust is responsible for managing certificate authorities
@@ -41,27 +45,27 @@ type Trust interface {
 	AuthorityGetter
 
 	// CreateCertAuthority inserts a new certificate authority
-	CreateCertAuthority(ca types.CertAuthority) error
+	CreateCertAuthority(ctx context.Context, ca types.CertAuthority) error
 
 	// UpsertCertAuthority updates or inserts a new certificate authority
-	UpsertCertAuthority(ca types.CertAuthority) error
+	UpsertCertAuthority(ctx context.Context, ca types.CertAuthority) error
 
 	// CompareAndSwapCertAuthority updates the cert authority value
 	// if existing value matches existing parameter,
 	// returns nil if succeeds, trace.CompareFailed otherwise
-	CompareAndSwapCertAuthority(new, existing types.CertAuthority) error
+	CompareAndSwapCertAuthority(ctx context.Context, new, existing types.CertAuthority) error
 
 	// DeleteCertAuthority deletes particular certificate authority
-	DeleteCertAuthority(id types.CertAuthID) error
+	DeleteCertAuthority(ctx context.Context, id types.CertAuthID) error
 
 	// DeleteAllCertAuthorities deletes cert authorities of a certain type
-	DeleteAllCertAuthorities(caType types.CertAuthType) error
+	DeleteAllCertAuthorities(ctx context.Context, caType types.CertAuthType) error
 
 	// ActivateCertAuthority moves a CertAuthority from the deactivated list to
 	// the normal list.
-	ActivateCertAuthority(id types.CertAuthID) error
+	ActivateCertAuthority(ctx context.Context, id types.CertAuthID) error
 
 	// DeactivateCertAuthority moves a CertAuthority from the normal list to
 	// the deactivated list.
-	DeactivateCertAuthority(id types.CertAuthID) error
+	DeactivateCertAuthority(ctx context.Context, id types.CertAuthID) error
 }

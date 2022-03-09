@@ -342,7 +342,7 @@ func (a *dbAuth) GetTLSConfig(ctx context.Context, sessionCtx *Session) (*tls.Co
 // getClientCert signs an ephemeral client certificate used by this
 // server to authenticate with the database instance.
 func (a *dbAuth) getClientCert(ctx context.Context, sessionCtx *Session) (cert *tls.Certificate, cas [][]byte, err error) {
-	privateBytes, _, err := native.GenerateKeyPair("")
+	privateBytes, _, err := native.GenerateKeyPair(ctx, "")
 	if err != nil {
 		return nil, nil, trace.Wrap(err)
 	}

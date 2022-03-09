@@ -250,7 +250,7 @@ func (u *Uploader) uploadFile(lockFilePath string, sessionID session.ID) error {
 		defer utils.FSUnlock(lockFile)
 
 		start := time.Now()
-		err := u.AuditLog.UploadSessionRecording(SessionRecording{
+		err := u.AuditLog.UploadSessionRecording(u.ctx, SessionRecording{
 			Namespace: u.Namespace,
 			SessionID: sessionID,
 			Recording: reader,

@@ -302,7 +302,7 @@ type tunnelConnection struct {
 
 // erase erases all data in the collection
 func (c *tunnelConnection) erase(ctx context.Context) error {
-	if err := c.presenceCache.DeleteAllTunnelConnections(); err != nil {
+	if err := c.presenceCache.DeleteAllTunnelConnections(ctx); err != nil {
 		if !trace.IsNotFound(err) {
 			return trace.Wrap(err)
 		}
@@ -311,7 +311,7 @@ func (c *tunnelConnection) erase(ctx context.Context) error {
 }
 
 func (c *tunnelConnection) fetch(ctx context.Context) (apply func(ctx context.Context) error, err error) {
-	resources, err := c.Presence.GetAllTunnelConnections()
+	resources, err := c.Presence.GetAllTunnelConnections(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -320,7 +320,7 @@ func (c *tunnelConnection) fetch(ctx context.Context) (apply func(ctx context.Co
 			return trace.Wrap(err)
 		}
 		for _, resource := range resources {
-			if err := c.presenceCache.UpsertTunnelConnection(resource); err != nil {
+			if err := c.presenceCache.UpsertTunnelConnection(ctx, resource); err != nil {
 				return trace.Wrap(err)
 			}
 		}
@@ -331,7 +331,7 @@ func (c *tunnelConnection) fetch(ctx context.Context) (apply func(ctx context.Co
 func (c *tunnelConnection) processEvent(ctx context.Context, event types.Event) error {
 	switch event.Type {
 	case types.OpDelete:
-		err := c.presenceCache.DeleteTunnelConnection(event.Resource.GetSubKind(), event.Resource.GetName())
+		err := c.presenceCache.DeleteTunnelConnection(ctx, event.Resource.GetSubKind(), event.Resource.GetName())
 		if err != nil {
 			// resource could be missing in the cache
 			// expired or not created, if the first consumed
@@ -346,7 +346,7 @@ func (c *tunnelConnection) processEvent(ctx context.Context, event types.Event) 
 		if !ok {
 			return trace.BadParameter("unexpected type %T", event.Resource)
 		}
-		if err := c.presenceCache.UpsertTunnelConnection(resource); err != nil {
+		if err := c.presenceCache.UpsertTunnelConnection(ctx, resource); err != nil {
 			return trace.Wrap(err)
 		}
 	default:
@@ -366,7 +366,7 @@ type remoteCluster struct {
 
 // erase erases all data in the collection
 func (c *remoteCluster) erase(ctx context.Context) error {
-	if err := c.presenceCache.DeleteAllRemoteClusters(); err != nil {
+	if err := c.presenceCache.DeleteAllRemoteClusters(ctx); err != nil {
 		if !trace.IsNotFound(err) {
 			return trace.Wrap(err)
 		}
@@ -375,7 +375,7 @@ func (c *remoteCluster) erase(ctx context.Context) error {
 }
 
 func (c *remoteCluster) fetch(ctx context.Context) (apply func(ctx context.Context) error, err error) {
-	resources, err := c.Presence.GetRemoteClusters()
+	resources, err := c.Presence.GetRemoteClusters(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -384,7 +384,7 @@ func (c *remoteCluster) fetch(ctx context.Context) (apply func(ctx context.Conte
 			return trace.Wrap(err)
 		}
 		for _, resource := range resources {
-			if err := c.presenceCache.CreateRemoteCluster(resource); err != nil {
+			if err := c.presenceCache.CreateRemoteCluster(ctx, resource); err != nil {
 				return trace.Wrap(err)
 			}
 		}
@@ -395,7 +395,7 @@ func (c *remoteCluster) fetch(ctx context.Context) (apply func(ctx context.Conte
 func (c *remoteCluster) processEvent(ctx context.Context, event types.Event) error {
 	switch event.Type {
 	case types.OpDelete:
-		err := c.presenceCache.DeleteRemoteCluster(event.Resource.GetName())
+		err := c.presenceCache.DeleteRemoteCluster(ctx, event.Resource.GetName())
 		if err != nil {
 			// resource could be missing in the cache
 			// expired or not created, if the first consumed
@@ -410,14 +410,14 @@ func (c *remoteCluster) processEvent(ctx context.Context, event types.Event) err
 		if !ok {
 			return trace.BadParameter("unexpected type %T", event.Resource)
 		}
-		err := c.presenceCache.DeleteRemoteCluster(event.Resource.GetName())
+		err := c.presenceCache.DeleteRemoteCluster(ctx, event.Resource.GetName())
 		if err != nil {
 			if !trace.IsNotFound(err) {
 				c.WithError(err).Warningf("Failed to delete remote cluster %v.", event.Resource.GetName())
 				return trace.Wrap(err)
 			}
 		}
-		if err := c.presenceCache.CreateRemoteCluster(resource); err != nil {
+		if err := c.presenceCache.CreateRemoteCluster(ctx, resource); err != nil {
 			return trace.Wrap(err)
 		}
 	default:
@@ -437,7 +437,7 @@ type reverseTunnel struct {
 
 // erase erases all data in the collection
 func (c *reverseTunnel) erase(ctx context.Context) error {
-	if err := c.presenceCache.DeleteAllReverseTunnels(); err != nil {
+	if err := c.presenceCache.DeleteAllReverseTunnels(ctx); err != nil {
 		if !trace.IsNotFound(err) {
 			return trace.Wrap(err)
 		}
@@ -446,7 +446,7 @@ func (c *reverseTunnel) erase(ctx context.Context) error {
 }
 
 func (c *reverseTunnel) fetch(ctx context.Context) (apply func(ctx context.Context) error, err error) {
-	resources, err := c.Presence.GetReverseTunnels()
+	resources, err := c.Presence.GetReverseTunnels(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -455,7 +455,7 @@ func (c *reverseTunnel) fetch(ctx context.Context) (apply func(ctx context.Conte
 			return trace.Wrap(err)
 		}
 		for _, resource := range resources {
-			if err := c.presenceCache.UpsertReverseTunnel(resource); err != nil {
+			if err := c.presenceCache.UpsertReverseTunnel(ctx, resource); err != nil {
 				return trace.Wrap(err)
 			}
 		}
@@ -466,7 +466,7 @@ func (c *reverseTunnel) fetch(ctx context.Context) (apply func(ctx context.Conte
 func (c *reverseTunnel) processEvent(ctx context.Context, event types.Event) error {
 	switch event.Type {
 	case types.OpDelete:
-		err := c.presenceCache.DeleteReverseTunnel(event.Resource.GetName())
+		err := c.presenceCache.DeleteReverseTunnel(ctx, event.Resource.GetName())
 		if err != nil {
 			// resource could be missing in the cache
 			// expired or not created, if the first consumed
@@ -481,7 +481,7 @@ func (c *reverseTunnel) processEvent(ctx context.Context, event types.Event) err
 		if !ok {
 			return trace.BadParameter("unexpected type %T", event.Resource)
 		}
-		if err := c.presenceCache.UpsertReverseTunnel(resource); err != nil {
+		if err := c.presenceCache.UpsertReverseTunnel(ctx, resource); err != nil {
 			return trace.Wrap(err)
 		}
 	default:
@@ -501,7 +501,7 @@ type proxy struct {
 
 // erase erases all data in the collection
 func (c *proxy) erase(ctx context.Context) error {
-	if err := c.presenceCache.DeleteAllProxies(); err != nil {
+	if err := c.presenceCache.DeleteAllProxies(ctx); err != nil {
 		if !trace.IsNotFound(err) {
 			return trace.Wrap(err)
 		}
@@ -510,7 +510,7 @@ func (c *proxy) erase(ctx context.Context) error {
 }
 
 func (c *proxy) fetch(ctx context.Context) (apply func(ctx context.Context) error, err error) {
-	resources, err := c.Presence.GetProxies()
+	resources, err := c.Presence.GetProxies(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -521,7 +521,7 @@ func (c *proxy) fetch(ctx context.Context) (apply func(ctx context.Context) erro
 		}
 
 		for _, resource := range resources {
-			if err := c.presenceCache.UpsertProxy(resource); err != nil {
+			if err := c.presenceCache.UpsertProxy(ctx, resource); err != nil {
 				return trace.Wrap(err)
 			}
 		}
@@ -532,7 +532,7 @@ func (c *proxy) fetch(ctx context.Context) (apply func(ctx context.Context) erro
 func (c *proxy) processEvent(ctx context.Context, event types.Event) error {
 	switch event.Type {
 	case types.OpDelete:
-		err := c.presenceCache.DeleteProxy(event.Resource.GetName())
+		err := c.presenceCache.DeleteProxy(ctx, event.Resource.GetName())
 		if err != nil {
 			// resource could be missing in the cache
 			// expired or not created, if the first consumed
@@ -547,7 +547,7 @@ func (c *proxy) processEvent(ctx context.Context, event types.Event) error {
 		if !ok {
 			return trace.BadParameter("unexpected type %T", event.Resource)
 		}
-		if err := c.presenceCache.UpsertProxy(resource); err != nil {
+		if err := c.presenceCache.UpsertProxy(ctx, resource); err != nil {
 			return trace.Wrap(err)
 		}
 	default:
@@ -567,7 +567,7 @@ type authServer struct {
 
 // erase erases all data in the collection
 func (c *authServer) erase(ctx context.Context) error {
-	if err := c.presenceCache.DeleteAllAuthServers(); err != nil {
+	if err := c.presenceCache.DeleteAllAuthServers(ctx); err != nil {
 		if !trace.IsNotFound(err) {
 			return trace.Wrap(err)
 		}
@@ -576,7 +576,7 @@ func (c *authServer) erase(ctx context.Context) error {
 }
 
 func (c *authServer) fetch(ctx context.Context) (apply func(ctx context.Context) error, err error) {
-	resources, err := c.Presence.GetAuthServers()
+	resources, err := c.Presence.GetAuthServers(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -587,7 +587,7 @@ func (c *authServer) fetch(ctx context.Context) (apply func(ctx context.Context)
 		}
 
 		for _, resource := range resources {
-			if err := c.presenceCache.UpsertAuthServer(resource); err != nil {
+			if err := c.presenceCache.UpsertAuthServer(ctx, resource); err != nil {
 				return trace.Wrap(err)
 			}
 		}
@@ -598,7 +598,7 @@ func (c *authServer) fetch(ctx context.Context) (apply func(ctx context.Context)
 func (c *authServer) processEvent(ctx context.Context, event types.Event) error {
 	switch event.Type {
 	case types.OpDelete:
-		err := c.presenceCache.DeleteAuthServer(event.Resource.GetName())
+		err := c.presenceCache.DeleteAuthServer(ctx, event.Resource.GetName())
 		if err != nil {
 			// resource could be missing in the cache
 			// expired or not created, if the first consumed
@@ -613,7 +613,7 @@ func (c *authServer) processEvent(ctx context.Context, event types.Event) error 
 		if !ok {
 			return trace.BadParameter("unexpected type %T", event.Resource)
 		}
-		if err := c.presenceCache.UpsertAuthServer(resource); err != nil {
+		if err := c.presenceCache.UpsertAuthServer(ctx, resource); err != nil {
 			return trace.Wrap(err)
 		}
 	default:
@@ -697,7 +697,7 @@ type namespace struct {
 
 // erase erases all data in the collection
 func (c *namespace) erase(ctx context.Context) error {
-	if err := c.presenceCache.DeleteAllNamespaces(); err != nil {
+	if err := c.presenceCache.DeleteAllNamespaces(ctx); err != nil {
 		if !trace.IsNotFound(err) {
 			return trace.Wrap(err)
 		}
@@ -706,7 +706,7 @@ func (c *namespace) erase(ctx context.Context) error {
 }
 
 func (c *namespace) fetch(ctx context.Context) (apply func(ctx context.Context) error, err error) {
-	resources, err := c.Presence.GetNamespaces()
+	resources, err := c.Presence.GetNamespaces(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -715,7 +715,7 @@ func (c *namespace) fetch(ctx context.Context) (apply func(ctx context.Context) 
 			return trace.Wrap(err)
 		}
 		for _, resource := range resources {
-			if err := c.presenceCache.UpsertNamespace(resource); err != nil {
+			if err := c.presenceCache.UpsertNamespace(ctx, resource); err != nil {
 				return trace.Wrap(err)
 			}
 		}
@@ -726,7 +726,7 @@ func (c *namespace) fetch(ctx context.Context) (apply func(ctx context.Context) 
 func (c *namespace) processEvent(ctx context.Context, event types.Event) error {
 	switch event.Type {
 	case types.OpDelete:
-		err := c.presenceCache.DeleteNamespace(event.Resource.GetName())
+		err := c.presenceCache.DeleteNamespace(ctx, event.Resource.GetName())
 		if err != nil {
 			// resource could be missing in the cache
 			// expired or not created, if the first consumed
@@ -741,7 +741,7 @@ func (c *namespace) processEvent(ctx context.Context, event types.Event) error {
 		if !ok {
 			return trace.BadParameter("unexpected type %T", event.Resource)
 		}
-		if err := c.presenceCache.UpsertNamespace(*resource); err != nil {
+		if err := c.presenceCache.UpsertNamespace(ctx, *resource); err != nil {
 			return trace.Wrap(err)
 		}
 	default:
@@ -763,17 +763,17 @@ type certAuthority struct {
 
 // erase erases all data in the collection
 func (c *certAuthority) erase(ctx context.Context) error {
-	if err := c.trustCache.DeleteAllCertAuthorities(types.UserCA); err != nil {
+	if err := c.trustCache.DeleteAllCertAuthorities(ctx, types.UserCA); err != nil {
 		if !trace.IsNotFound(err) {
 			return trace.Wrap(err)
 		}
 	}
-	if err := c.trustCache.DeleteAllCertAuthorities(types.HostCA); err != nil {
+	if err := c.trustCache.DeleteAllCertAuthorities(ctx, types.HostCA); err != nil {
 		if !trace.IsNotFound(err) {
 			return trace.Wrap(err)
 		}
 	}
-	if err := c.trustCache.DeleteAllCertAuthorities(types.JWTSigner); err != nil {
+	if err := c.trustCache.DeleteAllCertAuthorities(ctx, types.JWTSigner); err != nil {
 		if !trace.IsNotFound(err) {
 			return trace.Wrap(err)
 		}
@@ -782,17 +782,17 @@ func (c *certAuthority) erase(ctx context.Context) error {
 }
 
 func (c *certAuthority) fetch(ctx context.Context) (apply func(ctx context.Context) error, err error) {
-	applyHostCAs, err := c.fetchCertAuthorities(types.HostCA)
+	applyHostCAs, err := c.fetchCertAuthorities(ctx, types.HostCA)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
-	applyUserCAs, err := c.fetchCertAuthorities(types.UserCA)
+	applyUserCAs, err := c.fetchCertAuthorities(ctx, types.UserCA)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
-	applyJWTSigners, err := c.fetchCertAuthorities(types.JWTSigner)
+	applyJWTSigners, err := c.fetchCertAuthorities(ctx, types.JWTSigner)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -808,8 +808,8 @@ func (c *certAuthority) fetch(ctx context.Context) (apply func(ctx context.Conte
 	}, nil
 }
 
-func (c *certAuthority) fetchCertAuthorities(caType types.CertAuthType) (apply func(ctx context.Context) error, err error) {
-	authorities, err := c.Trust.GetCertAuthorities(caType, c.watch.LoadSecrets)
+func (c *certAuthority) fetchCertAuthorities(ctx context.Context, caType types.CertAuthType) (apply func(ctx context.Context) error, err error) {
+	authorities, err := c.Trust.GetCertAuthorities(ctx, caType, c.watch.LoadSecrets)
 	if err != nil {
 		// DELETE IN: 5.1
 		//
@@ -833,13 +833,13 @@ func (c *certAuthority) fetchCertAuthorities(caType types.CertAuthType) (apply f
 	}
 
 	return func(ctx context.Context) error {
-		if err := c.trustCache.DeleteAllCertAuthorities(caType); err != nil {
+		if err := c.trustCache.DeleteAllCertAuthorities(ctx, caType); err != nil {
 			if !trace.IsNotFound(err) {
 				return trace.Wrap(err)
 			}
 		}
 		for _, resource := range authorities {
-			if err := c.trustCache.UpsertCertAuthority(resource); err != nil {
+			if err := c.trustCache.UpsertCertAuthority(ctx, resource); err != nil {
 				return trace.Wrap(err)
 			}
 		}
@@ -850,7 +850,7 @@ func (c *certAuthority) fetchCertAuthorities(caType types.CertAuthType) (apply f
 func (c *certAuthority) processEvent(ctx context.Context, event types.Event) error {
 	switch event.Type {
 	case types.OpDelete:
-		err := c.trustCache.DeleteCertAuthority(types.CertAuthID{
+		err := c.trustCache.DeleteCertAuthority(ctx, types.CertAuthID{
 			Type:       types.CertAuthType(event.Resource.GetSubKind()),
 			DomainName: event.Resource.GetName(),
 		})
@@ -871,7 +871,7 @@ func (c *certAuthority) processEvent(ctx context.Context, event types.Event) err
 		if !c.filter.Match(resource) {
 			return nil
 		}
-		if err := c.trustCache.UpsertCertAuthority(resource); err != nil {
+		if err := c.trustCache.UpsertCertAuthority(ctx, resource); err != nil {
 			return trace.Wrap(err)
 		}
 	default:
@@ -891,7 +891,7 @@ type staticTokens struct {
 
 // erase erases all data in the collection
 func (c *staticTokens) erase(ctx context.Context) error {
-	err := c.clusterConfigCache.DeleteStaticTokens()
+	err := c.clusterConfigCache.DeleteStaticTokens(ctx)
 	if err != nil {
 		if !trace.IsNotFound(err) {
 			return trace.Wrap(err)
@@ -902,7 +902,7 @@ func (c *staticTokens) erase(ctx context.Context) error {
 
 func (c *staticTokens) fetch(ctx context.Context) (apply func(ctx context.Context) error, err error) {
 	var noTokens bool
-	staticTokens, err := c.ClusterConfig.GetStaticTokens()
+	staticTokens, err := c.ClusterConfig.GetStaticTokens(ctx)
 	if err != nil {
 		if !trace.IsNotFound(err) {
 			return nil, trace.Wrap(err)
@@ -918,7 +918,7 @@ func (c *staticTokens) fetch(ctx context.Context) (apply func(ctx context.Contex
 			}
 			return nil
 		}
-		err = c.clusterConfigCache.SetStaticTokens(staticTokens)
+		err = c.clusterConfigCache.SetStaticTokens(ctx, staticTokens)
 		if err != nil {
 			return trace.Wrap(err)
 		}
@@ -929,7 +929,7 @@ func (c *staticTokens) fetch(ctx context.Context) (apply func(ctx context.Contex
 func (c *staticTokens) processEvent(ctx context.Context, event types.Event) error {
 	switch event.Type {
 	case types.OpDelete:
-		err := c.clusterConfigCache.DeleteStaticTokens()
+		err := c.clusterConfigCache.DeleteStaticTokens(ctx)
 		if err != nil {
 			// resource could be missing in the cache
 			// expired or not created, if the first consumed
@@ -944,7 +944,7 @@ func (c *staticTokens) processEvent(ctx context.Context, event types.Event) erro
 		if !ok {
 			return trace.BadParameter("unexpected type %T", event.Resource)
 		}
-		if err := c.clusterConfigCache.SetStaticTokens(resource); err != nil {
+		if err := c.clusterConfigCache.SetStaticTokens(ctx, resource); err != nil {
 			return trace.Wrap(err)
 		}
 	default:
@@ -964,7 +964,7 @@ type provisionToken struct {
 
 // erase erases all data in the collection
 func (c *provisionToken) erase(ctx context.Context) error {
-	if err := c.provisionerCache.DeleteAllTokens(); err != nil {
+	if err := c.provisionerCache.DeleteAllTokens(ctx); err != nil {
 		if !trace.IsNotFound(err) {
 			return trace.Wrap(err)
 		}
@@ -1028,7 +1028,7 @@ type clusterConfig struct {
 
 // erase erases all data in the collection
 func (c *clusterConfig) erase(ctx context.Context) error {
-	err := c.clusterConfigCache.DeleteClusterConfig()
+	err := c.clusterConfigCache.DeleteClusterConfig(ctx)
 	if err != nil {
 		if !trace.IsNotFound(err) {
 			return trace.Wrap(err)
@@ -1038,7 +1038,7 @@ func (c *clusterConfig) erase(ctx context.Context) error {
 }
 
 func (c *clusterConfig) fetch(ctx context.Context) (apply func(ctx context.Context) error, err error) {
-	clusterConfig, err := c.ClusterConfig.GetClusterConfig()
+	clusterConfig, err := c.ClusterConfig.GetClusterConfig(ctx)
 	if err != nil {
 		if !trace.IsNotFound(err) {
 			return nil, trace.Wrap(err)
@@ -1085,7 +1085,7 @@ func (c *clusterConfig) storeDerivedResources(clusterConfig types.ClusterConfig,
 func (c *clusterConfig) processEvent(ctx context.Context, event types.Event) error {
 	switch event.Type {
 	case types.OpDelete:
-		err := c.clusterConfigCache.DeleteClusterConfig()
+		err := c.clusterConfigCache.DeleteClusterConfig(ctx)
 		if err != nil {
 			// resource could be missing in the cache
 			// expired or not created, if the first consumed
@@ -1122,7 +1122,7 @@ type clusterName struct {
 
 // erase erases all data in the collection
 func (c *clusterName) erase(ctx context.Context) error {
-	err := c.clusterConfigCache.DeleteClusterName()
+	err := c.clusterConfigCache.DeleteClusterName(ctx)
 	if err != nil {
 		if !trace.IsNotFound(err) {
 			return trace.Wrap(err)
@@ -1133,7 +1133,7 @@ func (c *clusterName) erase(ctx context.Context) error {
 
 func (c *clusterName) fetch(ctx context.Context) (apply func(ctx context.Context) error, err error) {
 	var noName bool
-	clusterName, err := c.ClusterConfig.GetClusterName()
+	clusterName, err := c.ClusterConfig.GetClusterName(ctx)
 	if err != nil {
 		if !trace.IsNotFound(err) {
 			return nil, trace.Wrap(err)
@@ -1146,7 +1146,7 @@ func (c *clusterName) fetch(ctx context.Context) (apply func(ctx context.Context
 		// from the legacy ClusterConfig resource and set it in ClusterName.
 		// DELETE IN 8.0.0
 		if clusterName.GetClusterID() == "" {
-			clusterConfig, err := c.ClusterConfig.GetClusterConfig()
+			clusterConfig, err := c.ClusterConfig.GetClusterConfig(ctx)
 			if err != nil {
 				return nil, trace.Wrap(err)
 			}
@@ -1162,7 +1162,7 @@ func (c *clusterName) fetch(ctx context.Context) (apply func(ctx context.Context
 			}
 			return nil
 		}
-		if err := c.clusterConfigCache.UpsertClusterName(clusterName); err != nil {
+		if err := c.clusterConfigCache.UpsertClusterName(ctx, clusterName); err != nil {
 			if !trace.IsNotFound(err) {
 				return trace.Wrap(err)
 			}
@@ -1174,7 +1174,7 @@ func (c *clusterName) fetch(ctx context.Context) (apply func(ctx context.Context
 func (c *clusterName) processEvent(ctx context.Context, event types.Event) error {
 	switch event.Type {
 	case types.OpDelete:
-		err := c.clusterConfigCache.DeleteClusterName()
+		err := c.clusterConfigCache.DeleteClusterName(ctx)
 		if err != nil {
 			// resource could be missing in the cache
 			// expired or not created, if the first consumed
@@ -1189,7 +1189,7 @@ func (c *clusterName) processEvent(ctx context.Context, event types.Event) error
 		if !ok {
 			return trace.BadParameter("unexpected type %T", event.Resource)
 		}
-		if err := c.clusterConfigCache.UpsertClusterName(resource); err != nil {
+		if err := c.clusterConfigCache.UpsertClusterName(ctx, resource); err != nil {
 			return trace.Wrap(err)
 		}
 	default:
@@ -1209,7 +1209,7 @@ type user struct {
 
 // erase erases all data in the collection
 func (c *user) erase(ctx context.Context) error {
-	if err := c.usersCache.DeleteAllUsers(); err != nil {
+	if err := c.usersCache.DeleteAllUsers(ctx); err != nil {
 		if !trace.IsNotFound(err) {
 			return trace.Wrap(err)
 		}
@@ -1218,7 +1218,7 @@ func (c *user) erase(ctx context.Context) error {
 }
 
 func (c *user) fetch(ctx context.Context) (apply func(ctx context.Context) error, err error) {
-	resources, err := c.Users.GetUsers(false)
+	resources, err := c.Users.GetUsers(ctx, false)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -1227,7 +1227,7 @@ func (c *user) fetch(ctx context.Context) (apply func(ctx context.Context) error
 			return trace.Wrap(err)
 		}
 		for _, resource := range resources {
-			if err := c.usersCache.UpsertUser(resource); err != nil {
+			if err := c.usersCache.UpsertUser(ctx, resource); err != nil {
 				return trace.Wrap(err)
 			}
 		}
@@ -1254,7 +1254,7 @@ func (c *user) processEvent(ctx context.Context, event types.Event) error {
 		if !ok {
 			return trace.BadParameter("unexpected type %T", event.Resource)
 		}
-		if err := c.usersCache.UpsertUser(resource); err != nil {
+		if err := c.usersCache.UpsertUser(ctx, resource); err != nil {
 			return trace.Wrap(err)
 		}
 	default:
@@ -1274,7 +1274,7 @@ type role struct {
 
 // erase erases all data in the collection
 func (c *role) erase(ctx context.Context) error {
-	if err := c.accessCache.DeleteAllRoles(); err != nil {
+	if err := c.accessCache.DeleteAllRoles(ctx); err != nil {
 		if !trace.IsNotFound(err) {
 			return trace.Wrap(err)
 		}

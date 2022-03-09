@@ -24,13 +24,13 @@ func NewCAService(b backend.Backend) *CA {
 }
 
 // DeleteAllCertAuthorities deletes all certificate authorities of a certain type
-func (s *CA) DeleteAllCertAuthorities(caType types.CertAuthType) error {
+func (s *CA) DeleteAllCertAuthorities(ctx context.Context, caType types.CertAuthType) error {
 	startKey := backend.Key(authoritiesPrefix, string(caType))
-	return s.DeleteRange(context.TODO(), startKey, backend.RangeEnd(startKey))
+	return s.DeleteRange(ctx, startKey, backend.RangeEnd(startKey))
 }
 
 // CreateCertAuthority updates or inserts a new certificate authority
-func (s *CA) CreateCertAuthority(ca types.CertAuthority) error {
+func (s *CA) CreateCertAuthority(ctx context.Context, ca types.CertAuthority) error {
 	if err := services.ValidateCertAuthority(ca); err != nil {
 		return trace.Wrap(err)
 	}
@@ -44,7 +44,7 @@ func (s *CA) CreateCertAuthority(ca types.CertAuthority) error {
 		Expires: ca.Expiry(),
 	}
 
-	_, err = s.Create(context.TODO(), item)
+	_, err = s.Create(ctx, item)
 	if err != nil {
 		if trace.IsAlreadyExists(err) {
 			return trace.AlreadyExists("cluster %q already exists", ca.GetName())
@@ -55,13 +55,13 @@ func (s *CA) CreateCertAuthority(ca types.CertAuthority) error {
 }
 
 // UpsertCertAuthority updates or inserts a new certificate authority
-func (s *CA) UpsertCertAuthority(ca types.CertAuthority) error {
+func (s *CA) UpsertCertAuthority(ctx context.Context, ca types.CertAuthority) error {
 	if err := services.ValidateCertAuthority(ca); err != nil {
 		return trace.Wrap(err)
 	}
 
 	// try to skip writes that would have no effect
-	if existing, err := s.GetCertAuthority(types.CertAuthID{
+	if existing, err := s.GetCertAuthority(ctx, types.CertAuthID{
 		Type:       ca.GetType(),
 		DomainName: ca.GetClusterName(),
 	}, true); err == nil {
@@ -81,7 +81,7 @@ func (s *CA) UpsertCertAuthority(ca types.CertAuthority) error {
 		ID:      ca.GetResourceID(),
 	}
 
-	_, err = s.Put(context.TODO(), item)
+	_, err = s.Put(ctx, item)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -91,7 +91,7 @@ func (s *CA) UpsertCertAuthority(ca types.CertAuthority) error {
 // CompareAndSwapCertAuthority updates the cert authority value
 // if the existing value matches existing parameter, returns nil if succeeds,
 // trace.CompareFailed otherwise.
-func (s *CA) CompareAndSwapCertAuthority(new, existing types.CertAuthority) error {
+func (s *CA) CompareAndSwapCertAuthority(ctx context.Context, new, existing types.CertAuthority) error {
 	if err := services.ValidateCertAuthority(new); err != nil {
 		return trace.Wrap(err)
 	}
@@ -115,7 +115,7 @@ func (s *CA) CompareAndSwapCertAuthority(new, existing types.CertAuthority) erro
 		Expires: existing.Expiry(),
 	}
 
-	_, err = s.CompareAndSwap(context.TODO(), existingItem, newItem)
+	_, err = s.CompareAndSwap(ctx, existingItem, newItem)
 	if err != nil {
 		if trace.IsCompareFailed(err) {
 			return trace.CompareFailed("cluster %v settings have been updated, try again", new.GetName())
@@ -126,19 +126,19 @@ func (s *CA) CompareAndSwapCertAuthority(new, existing types.CertAuthority) erro
 }
 
 // DeleteCertAuthority deletes particular certificate authority
-func (s *CA) DeleteCertAuthority(id types.CertAuthID) error {
+func (s *CA) DeleteCertAuthority(ctx context.Context, id types.CertAuthID) error {
 	if err := id.Check(); err != nil {
 		return trace.Wrap(err)
 	}
 	// when removing a types.CertAuthority also remove any deactivated
 	// types.CertAuthority as well if they exist.
-	err := s.Delete(context.TODO(), backend.Key(authoritiesPrefix, deactivatedPrefix, string(id.Type), id.DomainName))
+	err := s.Delete(ctx, backend.Key(authoritiesPrefix, deactivatedPrefix, string(id.Type), id.DomainName))
 	if err != nil {
 		if !trace.IsNotFound(err) {
 			return trace.Wrap(err)
 		}
 	}
-	err = s.Delete(context.TODO(), backend.Key(authoritiesPrefix, string(id.Type), id.DomainName))
+	err = s.Delete(ctx, backend.Key(authoritiesPrefix, string(id.Type), id.DomainName))
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -147,8 +147,8 @@ func (s *CA) DeleteCertAuthority(id types.CertAuthID) error {
 
 // ActivateCertAuthority moves a CertAuthority from the deactivated list to
 // the normal list.
-func (s *CA) ActivateCertAuthority(id types.CertAuthID) error {
-	item, err := s.Get(context.TODO(), backend.Key(authoritiesPrefix, deactivatedPrefix, string(id.Type), id.DomainName))
+func (s *CA) ActivateCertAuthority(ctx context.Context, id types.CertAuthID) error {
+	item, err := s.Get(ctx, backend.Key(authoritiesPrefix, deactivatedPrefix, string(id.Type), id.DomainName))
 	if err != nil {
 		if trace.IsNotFound(err) {
 			return trace.BadParameter("can not activate cert authority %q which has not been deactivated", id.DomainName)
@@ -162,12 +162,12 @@ func (s *CA) ActivateCertAuthority(id types.CertAuthID) error {
 		return trace.Wrap(err)
 	}
 
-	err = s.UpsertCertAuthority(certAuthority)
+	err = s.UpsertCertAuthority(ctx, certAuthority)
 	if err != nil {
 		return trace.Wrap(err)
 	}
 
-	err = s.Delete(context.TODO(), backend.Key(authoritiesPrefix, deactivatedPrefix, string(id.Type), id.DomainName))
+	err = s.Delete(ctx, backend.Key(authoritiesPrefix, deactivatedPrefix, string(id.Type), id.DomainName))
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -177,8 +177,8 @@ func (s *CA) ActivateCertAuthority(id types.CertAuthID) error {
 
 // DeactivateCertAuthority moves a CertAuthority from the normal list to
 // the deactivated list.
-func (s *CA) DeactivateCertAuthority(id types.CertAuthID) error {
-	certAuthority, err := s.GetCertAuthority(id, true)
+func (s *CA) DeactivateCertAuthority(ctx context.Context, id types.CertAuthID) error {
+	certAuthority, err := s.GetCertAuthority(ctx, id, true)
 	if err != nil {
 		if trace.IsNotFound(err) {
 			return trace.NotFound("can not deactivate cert authority %q which does not exist", id.DomainName)
@@ -186,7 +186,7 @@ func (s *CA) DeactivateCertAuthority(id types.CertAuthID) error {
 		return trace.Wrap(err)
 	}
 
-	err = s.DeleteCertAuthority(id)
+	err = s.DeleteCertAuthority(ctx, id)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -202,7 +202,7 @@ func (s *CA) DeactivateCertAuthority(id types.CertAuthID) error {
 		ID:      certAuthority.GetResourceID(),
 	}
 
-	_, err = s.Put(context.TODO(), item)
+	_, err = s.Put(ctx, item)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -212,11 +212,11 @@ func (s *CA) DeactivateCertAuthority(id types.CertAuthID) error {
 
 // GetCertAuthority returns certificate authority by given id. Parameter loadSigningKeys
 // controls if signing keys are loaded
-func (s *CA) GetCertAuthority(id types.CertAuthID, loadSigningKeys bool, opts ...services.MarshalOption) (types.CertAuthority, error) {
+func (s *CA) GetCertAuthority(ctx context.Context, id types.CertAuthID, loadSigningKeys bool, opts ...services.MarshalOption) (types.CertAuthority, error) {
 	if err := id.Check(); err != nil {
 		return nil, trace.Wrap(err)
 	}
-	item, err := s.Get(context.TODO(), backend.Key(authoritiesPrefix, string(id.Type), id.DomainName))
+	item, err := s.Get(ctx, backend.Key(authoritiesPrefix, string(id.Type), id.DomainName))
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -241,14 +241,14 @@ func setSigningKeys(ca types.CertAuthority, loadSigningKeys bool) {
 
 // GetCertAuthorities returns a list of authorities of a given type
 // loadSigningKeys controls whether signing keys should be loaded or not
-func (s *CA) GetCertAuthorities(caType types.CertAuthType, loadSigningKeys bool, opts ...services.MarshalOption) ([]types.CertAuthority, error) {
+func (s *CA) GetCertAuthorities(ctx context.Context, caType types.CertAuthType, loadSigningKeys bool, opts ...services.MarshalOption) ([]types.CertAuthority, error) {
 	if err := caType.Check(); err != nil {
 		return nil, trace.Wrap(err)
 	}
 
 	// Get all items in the bucket.
 	startKey := backend.Key(authoritiesPrefix, string(caType))
-	result, err := s.GetRange(context.TODO(), startKey, backend.RangeEnd(startKey), backend.NoLimit)
+	result, err := s.GetRange(ctx, startKey, backend.RangeEnd(startKey), backend.NoLimit)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

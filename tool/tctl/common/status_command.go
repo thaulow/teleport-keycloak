@@ -47,9 +47,11 @@ func (c *StatusCommand) Initialize(app *kingpin.Application, config *service.Con
 
 // TryRun takes the CLI command as an argument (like "nodes ls") and executes it.
 func (c *StatusCommand) TryRun(cmd string, client auth.ClientI) (match bool, err error) {
+	ctx := context.Background()
+
 	switch cmd {
 	case c.status.FullCommand():
-		err = c.Status(client)
+		err = c.Status(ctx, client)
 	default:
 		return false, nil
 	}
@@ -57,29 +59,29 @@ func (c *StatusCommand) TryRun(cmd string, client auth.ClientI) (match bool, err
 }
 
 // Status is called to execute "status" CLI command.
-func (c *StatusCommand) Status(client auth.ClientI) error {
-	pingRsp, err := client.Ping(context.TODO())
+func (c *StatusCommand) Status(ctx context.Context, client auth.ClientI) error {
+	pingRsp, err := client.Ping(ctx)
 	if err != nil {
 		return trace.Wrap(err)
 	}
 	serverVersion := pingRsp.ServerVersion
 	clusterName := pingRsp.ClusterName
 
-	authorities := []types.CertAuthority{}
+	var authorities []types.CertAuthority
 
-	hostCAs, err := client.GetCertAuthorities(types.HostCA, false)
+	hostCAs, err := client.GetCertAuthorities(ctx, types.HostCA, false)
 	if err != nil {
 		return trace.Wrap(err)
 	}
 	authorities = append(authorities, hostCAs...)
 
-	userCAs, err := client.GetCertAuthorities(types.UserCA, false)
+	userCAs, err := client.GetCertAuthorities(ctx, types.UserCA, false)
 	if err != nil {
 		return trace.Wrap(err)
 	}
 	authorities = append(authorities, userCAs...)
 
-	jwtKeys, err := client.GetCertAuthorities(types.JWTSigner, false)
+	jwtKeys, err := client.GetCertAuthorities(ctx, types.JWTSigner, false)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -87,7 +89,7 @@ func (c *StatusCommand) Status(client auth.ClientI) error {
 
 	// Calculate the CA pins for this cluster. The CA pins are used by the
 	// client to verify the identity of the Auth Server.
-	localCAResponse, err := client.GetClusterCACert()
+	localCAResponse, err := client.GetClusterCACert(ctx)
 	if err != nil {
 		return trace.Wrap(err)
 	}

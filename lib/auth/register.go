@@ -41,7 +41,7 @@ func LocalRegister(id IdentityID, authServer *Server, additionalPrincipals, dnsN
 	if remoteAddr == "" {
 		remoteAddr = defaults.Localhost
 	}
-	keys, err := authServer.GenerateServerKeys(GenerateServerKeysRequest{
+	keys, err := authServer.GenerateServerKeys(context.TODO(), GenerateServerKeysRequest{
 		HostID:               id.HostUUID,
 		NodeName:             id.NodeName,
 		Roles:                types.SystemRoles{id.Role},
@@ -216,7 +216,7 @@ func registerThroughAuth(token string, params RegisterParams) (*Identity, error)
 	defer client.Close()
 
 	// Get the SSH and X509 certificates for a node.
-	keys, err := client.RegisterUsingToken(RegisterUsingTokenRequest{
+	keys, err := client.RegisterUsingToken(context.TODO(), RegisterUsingTokenRequest{
 		Token:                token,
 		HostID:               params.ID.HostUUID,
 		NodeName:             params.ID.NodeName,
@@ -316,7 +316,7 @@ func pinRegisterClient(params RegisterParams) (*Client, error) {
 
 	// Fetch the root CA from the Auth Server. The NOP role has access to the
 	// GetClusterCACert endpoint.
-	localCA, err := authClient.GetClusterCACert()
+	localCA, err := authClient.GetClusterCACert(context.TODO())
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -393,7 +393,7 @@ func ReRegister(params ReRegisterParams) (*Identity, error) {
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	keys, err := params.Client.GenerateServerKeys(GenerateServerKeysRequest{
+	keys, err := params.Client.GenerateServerKeys(context.TODO(), GenerateServerKeysRequest{
 		HostID:               hostID,
 		NodeName:             params.ID.NodeName,
 		Roles:                types.SystemRoles{params.ID.Role},

@@ -355,7 +355,7 @@ func (s *server) disconnectClusters() error {
 	if len(connectedRemoteClusters) == 0 {
 		return nil
 	}
-	remoteClusters, err := s.localAuthClient.GetRemoteClusters()
+	remoteClusters, err := s.localAuthClient.GetRemoteClusters(s.ctx)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -411,7 +411,7 @@ func (s *server) periodicFunctions() {
 // peer map. This map is used later by GetSite(s) to return either local or
 // remote site, or if non match, a cluster peer.
 func (s *server) fetchClusterPeers() error {
-	conns, err := s.LocalAccessPoint.GetAllTunnelConnections()
+	conns, err := s.LocalAccessPoint.GetAllTunnelConnections(s.ctx)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -442,7 +442,7 @@ func (s *server) fetchClusterPeers() error {
 }
 
 func (s *server) reportClusterStats() error {
-	clusters, err := s.GetSites()
+	clusters, err := s.GetSites(s.ctx)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -721,7 +721,7 @@ func (s *server) findLocalCluster(sconn *ssh.ServerConn) (*localSite, error) {
 }
 
 func (s *server) getTrustedCAKeysByID(id types.CertAuthID) ([]ssh.PublicKey, error) {
-	ca, err := s.localAccessPoint.GetCertAuthority(id, false)
+	ca, err := s.localAccessPoint.GetCertAuthority(s.ctx, id, false)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -895,7 +895,7 @@ func (s *server) upsertRemoteCluster(conn net.Conn, sshConn *ssh.ServerConn) (*r
 	return site, remoteConn, nil
 }
 
-func (s *server) GetSites() ([]RemoteSite, error) {
+func (s *server) GetSites(ctx context.Context) ([]RemoteSite, error) {
 	s.RLock()
 	defer s.RUnlock()
 	out := make([]RemoteSite, 0, len(s.localSites)+len(s.remoteSites)+len(s.clusterPeers))
@@ -933,7 +933,7 @@ func (s *server) getRemoteClusters() []*remoteSite {
 // with a cluster peer your best bet is to wait until the agent has discovered
 // all proxies behind a the load balancer. Note, the cluster peer is a
 // services.TunnelConnection that was created by another proxy.
-func (s *server) GetSite(name string) (RemoteSite, error) {
+func (s *server) GetSite(ctx context.Context, name string) (RemoteSite, error) {
 	s.RLock()
 	defer s.RUnlock()
 	for i := range s.localSites {
@@ -1028,7 +1028,7 @@ func newRemoteSite(srv *server, domainName string, sconn ssh.Conn) (*remoteSite,
 	remoteSite.localClient = srv.localAuthClient
 	remoteSite.localAccessPoint = srv.localAccessPoint
 
-	clt, _, err := remoteSite.getRemoteClient()
+	clt, _, err := remoteSite.getRemoteClient(closeContext)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

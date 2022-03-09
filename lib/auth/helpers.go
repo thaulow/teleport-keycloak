@@ -264,7 +264,7 @@ func NewTestAuthServer(cfg TestAuthServerConfig) (*TestAuthServer, error) {
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	err = srv.AuthServer.SetClusterName(clusterName)
+	err = srv.AuthServer.SetClusterName(ctx, clusterName)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -281,7 +281,7 @@ func NewTestAuthServer(cfg TestAuthServerConfig) (*TestAuthServer, error) {
 		return nil, trace.Wrap(err)
 	}
 
-	err = srv.AuthServer.SetClusterConfig(types.DefaultClusterConfig())
+	err = srv.AuthServer.SetClusterConfig(ctx, types.DefaultClusterConfig())
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -293,7 +293,7 @@ func NewTestAuthServer(cfg TestAuthServerConfig) (*TestAuthServer, error) {
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	err = srv.AuthServer.SetStaticTokens(staticTokens)
+	err = srv.AuthServer.SetStaticTokens(ctx, staticTokens)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -305,21 +305,21 @@ func NewTestAuthServer(cfg TestAuthServerConfig) (*TestAuthServer, error) {
 	}
 
 	// Setup certificate and signing authorities.
-	if err = srv.AuthServer.UpsertCertAuthority(suite.NewTestCAWithConfig(suite.TestCAConfig{
+	if err = srv.AuthServer.UpsertCertAuthority(ctx, suite.NewTestCAWithConfig(suite.TestCAConfig{
 		Type:        types.HostCA,
 		ClusterName: srv.ClusterName,
 		Clock:       cfg.Clock,
 	})); err != nil {
 		return nil, trace.Wrap(err)
 	}
-	if err = srv.AuthServer.UpsertCertAuthority(suite.NewTestCAWithConfig(suite.TestCAConfig{
+	if err = srv.AuthServer.UpsertCertAuthority(ctx, suite.NewTestCAWithConfig(suite.TestCAConfig{
 		Type:        types.UserCA,
 		ClusterName: srv.ClusterName,
 		Clock:       cfg.Clock,
 	})); err != nil {
 		return nil, trace.Wrap(err)
 	}
-	if err = srv.AuthServer.UpsertCertAuthority(suite.NewTestCAWithConfig(suite.TestCAConfig{
+	if err = srv.AuthServer.UpsertCertAuthority(ctx, suite.NewTestCAWithConfig(suite.TestCAConfig{
 		Type:        types.JWTSigner,
 		ClusterName: srv.ClusterName,
 		Clock:       cfg.Clock,
@@ -359,8 +359,8 @@ func (a *TestAuthServer) Close() error {
 // GenerateUserCert takes the public key in the OpenSSH `authorized_keys`
 // plain text format, signs it using User Certificate Authority signing key and returns the
 // resulting certificate.
-func (a *TestAuthServer) GenerateUserCert(key []byte, username string, ttl time.Duration, compatibility string) ([]byte, error) {
-	user, err := a.AuthServer.GetUser(username, false)
+func (a *TestAuthServer) GenerateUserCert(ctx context.Context, key []byte, username string, ttl time.Duration, compatibility string) ([]byte, error) {
+	user, err := a.AuthServer.GetUser(ctx, username, false)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -368,7 +368,7 @@ func (a *TestAuthServer) GenerateUserCert(key []byte, username string, ttl time.
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	certs, err := a.AuthServer.generateUserCert(certRequest{
+	certs, err := a.AuthServer.generateUserCert(ctx, certRequest{
 		user:          user,
 		ttl:           ttl,
 		compatibility: compatibility,
@@ -384,10 +384,10 @@ func (a *TestAuthServer) GenerateUserCert(key []byte, username string, ttl time.
 
 // generateCertificate generates certificate for identity,
 // returns private public key pair
-func generateCertificate(authServer *Server, identity TestIdentity) ([]byte, []byte, error) {
+func generateCertificate(ctx context.Context, authServer *Server, identity TestIdentity) ([]byte, []byte, error) {
 	switch id := identity.I.(type) {
 	case LocalUser:
-		user, err := authServer.GetUser(id.Username, false)
+		user, err := authServer.GetUser(ctx, id.Username, false)
 		if err != nil {
 			return nil, nil, trace.Wrap(err)
 		}
@@ -398,11 +398,11 @@ func generateCertificate(authServer *Server, identity TestIdentity) ([]byte, []b
 		if identity.TTL == 0 {
 			identity.TTL = time.Hour
 		}
-		priv, pub, err := authServer.GenerateKeyPair("")
+		priv, pub, err := authServer.GenerateKeyPair(ctx, "")
 		if err != nil {
 			return nil, nil, trace.Wrap(err)
 		}
-		certs, err := authServer.generateUserCert(certRequest{
+		certs, err := authServer.generateUserCert(ctx, certRequest{
 			publicKey:      pub,
 			user:           user,
 			ttl:            identity.TTL,
@@ -416,7 +416,7 @@ func generateCertificate(authServer *Server, identity TestIdentity) ([]byte, []b
 		}
 		return certs.tls, priv, nil
 	case BuiltinRole:
-		keys, err := authServer.GenerateServerKeys(GenerateServerKeysRequest{
+		keys, err := authServer.GenerateServerKeys(ctx, GenerateServerKeysRequest{
 			HostID:   id.Username,
 			NodeName: id.Username,
 			Roles:    types.SystemRoles{id.Role},
@@ -426,7 +426,7 @@ func generateCertificate(authServer *Server, identity TestIdentity) ([]byte, []b
 		}
 		return keys.TLSCert, keys.Key, nil
 	case RemoteBuiltinRole:
-		keys, err := authServer.GenerateServerKeys(GenerateServerKeysRequest{
+		keys, err := authServer.GenerateServerKeys(ctx, GenerateServerKeysRequest{
 			HostID:   id.Username,
 			NodeName: id.Username,
 			Roles:    types.SystemRoles{id.Role},
@@ -442,7 +442,7 @@ func generateCertificate(authServer *Server, identity TestIdentity) ([]byte, []b
 
 // NewCertificate returns new TLS credentials generated by test auth server
 func (a *TestAuthServer) NewCertificate(identity TestIdentity) (*tls.Certificate, error) {
-	cert, key, err := generateCertificate(a.AuthServer, identity)
+	cert, key, err := generateCertificate(context.Background(), a.AuthServer, identity)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -460,18 +460,19 @@ func (a *TestAuthServer) Clock() clockwork.Clock {
 
 // Trust adds other server host certificate authority as trusted
 func (a *TestAuthServer) Trust(remote *TestAuthServer, roleMap types.RoleMap) error {
-	remoteCA, err := remote.AuthServer.GetCertAuthority(types.CertAuthID{
+	ctx := context.Background()
+	remoteCA, err := remote.AuthServer.GetCertAuthority(ctx, types.CertAuthID{
 		Type:       types.HostCA,
 		DomainName: remote.ClusterName,
 	}, false)
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	err = a.AuthServer.UpsertCertAuthority(remoteCA)
+	err = a.AuthServer.UpsertCertAuthority(ctx, remoteCA)
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	remoteCA, err = remote.AuthServer.GetCertAuthority(types.CertAuthID{
+	remoteCA, err = remote.AuthServer.GetCertAuthority(ctx, types.CertAuthID{
 		Type:       types.UserCA,
 		DomainName: remote.ClusterName,
 	}, false)
@@ -479,7 +480,7 @@ func (a *TestAuthServer) Trust(remote *TestAuthServer, roleMap types.RoleMap) er
 		return trace.Wrap(err)
 	}
 	remoteCA.SetRoleMap(roleMap)
-	err = a.AuthServer.UpsertCertAuthority(remoteCA)
+	err = a.AuthServer.UpsertCertAuthority(ctx, remoteCA)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -845,7 +846,7 @@ func (t *TestTLSServer) Stop() error {
 
 // NewServerIdentity generates new server identity, used in tests
 func NewServerIdentity(clt *Server, hostID string, role types.SystemRole) (*Identity, error) {
-	keys, err := clt.GenerateServerKeys(GenerateServerKeysRequest{
+	keys, err := clt.GenerateServerKeys(context.TODO(), GenerateServerKeysRequest{
 		HostID:   hostID,
 		NodeName: hostID,
 		Roles:    types.SystemRoles{types.RoleAuth},

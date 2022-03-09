@@ -344,7 +344,7 @@ func (l *Log) EmitAuditEvent(ctx context.Context, in apievents.AuditEvent) error
 }
 
 // EmitAuditEventLegacy emits audit event
-func (l *Log) EmitAuditEventLegacy(ev events.Event, fields events.EventFields) error {
+func (l *Log) EmitAuditEventLegacy(ctx context.Context, ev events.Event, fields events.EventFields) error {
 	sessionID := fields.GetString(events.SessionEventID)
 	eventIndex := fields.GetInt(events.EventIndex)
 	// no session id - global event gets a random uuid to get a good partition
@@ -383,7 +383,7 @@ func (l *Log) EmitAuditEventLegacy(ev events.Event, fields events.EventFields) e
 }
 
 // PostSessionSlice sends chunks of recorded session to the event log
-func (l *Log) PostSessionSlice(slice events.SessionSlice) error {
+func (l *Log) PostSessionSlice(ctx context.Context, slice events.SessionSlice) error {
 	batch := l.svc.Batch()
 	for _, chunk := range slice.Chunks {
 		// if legacy event with no type or print event, skip it
@@ -418,7 +418,7 @@ func (l *Log) PostSessionSlice(slice events.SessionSlice) error {
 	return nil
 }
 
-func (l *Log) UploadSessionRecording(events.SessionRecording) error {
+func (l *Log) UploadSessionRecording(context.Context, events.SessionRecording) error {
 	return trace.NotImplemented("UploadSessionRecording not implemented for firestore backend")
 }
 
@@ -427,7 +427,7 @@ func (l *Log) UploadSessionRecording(events.SessionRecording) error {
 // beginning) up to maxBytes bytes.
 //
 // If maxBytes > MaxChunkBytes, it gets rounded down to MaxChunkBytes
-func (l *Log) GetSessionChunk(namespace string, sid session.ID, offsetBytes, maxBytes int) ([]byte, error) {
+func (l *Log) GetSessionChunk(ctx context.Context, namespace string, sid session.ID, offsetBytes, maxBytes int) ([]byte, error) {
 	return nil, trace.NotImplemented("GetSessionChunk not implemented for firestore backend")
 }
 
@@ -438,7 +438,7 @@ func (l *Log) GetSessionChunk(namespace string, sid session.ID, offsetBytes, max
 //
 // This function is usually used in conjunction with GetSessionReader to
 // replay recorded session streams.
-func (l *Log) GetSessionEvents(namespace string, sid session.ID, after int, inlcudePrintEvents bool) ([]events.EventFields, error) {
+func (l *Log) GetSessionEvents(ctx context.Context, namespace string, sid session.ID, after int, inlcudePrintEvents bool) ([]events.EventFields, error) {
 	var values []events.EventFields
 	start := time.Now()
 	docSnaps, err := l.svc.Collection(l.CollectionName).Where(sessionIDDocProperty, "==", string(sid)).
@@ -473,14 +473,14 @@ func (l *Log) GetSessionEvents(namespace string, sid session.ID, after int, inlc
 // The only mandatory requirement is a date range (UTC).
 //
 // This function may never return more than 1 MiB of event data.
-func (l *Log) SearchEvents(fromUTC, toUTC time.Time, namespace string, eventTypes []string, limit int, order types.EventOrder, startKey string) ([]apievents.AuditEvent, string, error) {
+func (l *Log) SearchEvents(ctx context.Context, fromUTC, toUTC time.Time, namespace string, eventTypes []string, limit int, order types.EventOrder, startKey string) ([]apievents.AuditEvent, string, error) {
 	var eventsArr []apievents.AuditEvent
 	var estimatedSize int
 	checkpoint := startKey
 	left := limit
 
 	for {
-		gotEvents, withSize, withCheckpoint, err := l.searchEventsOnce(fromUTC, toUTC, namespace, eventTypes, left, order, checkpoint, events.MaxEventBytesInResponse-estimatedSize)
+		gotEvents, withSize, withCheckpoint, err := l.searchEventsOnce(ctx, fromUTC, toUTC, namespace, eventTypes, left, order, checkpoint, events.MaxEventBytesInResponse-estimatedSize)
 		if nil != err {
 			return nil, "", trace.Wrap(err)
 		}
@@ -498,7 +498,7 @@ func (l *Log) SearchEvents(fromUTC, toUTC time.Time, namespace string, eventType
 	return eventsArr, checkpoint, nil
 }
 
-func (l *Log) searchEventsOnce(fromUTC, toUTC time.Time, namespace string, eventTypes []string, limit int, order types.EventOrder, startKey string, spaceRemaining int) ([]apievents.AuditEvent, int, string, error) {
+func (l *Log) searchEventsOnce(ctx context.Context, fromUTC, toUTC time.Time, namespace string, eventTypes []string, limit int, order types.EventOrder, startKey string, spaceRemaining int) ([]apievents.AuditEvent, int, string, error) {
 	g := l.WithFields(log.Fields{"From": fromUTC, "To": toUTC, "Namespace": namespace, "EventTypes": eventTypes, "Limit": limit, "StartKey": startKey})
 	doFilter := len(eventTypes) > 0
 
@@ -621,13 +621,13 @@ func (l *Log) searchEventsOnce(fromUTC, toUTC time.Time, namespace string, event
 
 // SearchSessionEvents returns session related events only. This is used to
 // find completed session.
-func (l *Log) SearchSessionEvents(fromUTC time.Time, toUTC time.Time, limit int, order types.EventOrder, startKey string) ([]apievents.AuditEvent, string, error) {
+func (l *Log) SearchSessionEvents(ctx context.Context, fromUTC time.Time, toUTC time.Time, limit int, order types.EventOrder, startKey string) ([]apievents.AuditEvent, string, error) {
 	// only search for specific event types
 	query := []string{
 		events.SessionStartEvent,
 		events.SessionEndEvent,
 	}
-	return l.SearchEvents(fromUTC, toUTC, apidefaults.Namespace, query, limit, order, startKey)
+	return l.SearchEvents(ctx, fromUTC, toUTC, apidefaults.Namespace, query, limit, order, startKey)
 }
 
 // WaitForDelivery waits for resources to be released and outstanding requests to

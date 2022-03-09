@@ -108,7 +108,7 @@ func (s *Server) newStreamWriter(identity *tlsca.Identity, app *types.App) (even
 		return nil, trace.Wrap(err)
 	}
 
-	clusterName, err := s.c.AccessPoint.GetClusterName()
+	clusterName, err := s.c.AccessPoint.GetClusterName(context.TODO())
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

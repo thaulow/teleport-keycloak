@@ -56,8 +56,8 @@ func NewClusterConfigurationService(backend backend.Backend) (*ClusterConfigurat
 }
 
 // GetClusterName gets the name of the cluster from the backend.
-func (s *ClusterConfigurationService) GetClusterName(opts ...services.MarshalOption) (types.ClusterName, error) {
-	item, err := s.Get(context.TODO(), backend.Key(clusterConfigPrefix, namePrefix))
+func (s *ClusterConfigurationService) GetClusterName(ctx context.Context, opts ...services.MarshalOption) (types.ClusterName, error) {
+	item, err := s.Get(ctx, backend.Key(clusterConfigPrefix, namePrefix))
 	if err != nil {
 		if trace.IsNotFound(err) {
 			clusterNameNotFound.Inc()
@@ -70,8 +70,8 @@ func (s *ClusterConfigurationService) GetClusterName(opts ...services.MarshalOpt
 }
 
 // DeleteClusterName deletes types.ClusterName from the backend.
-func (s *ClusterConfigurationService) DeleteClusterName() error {
-	err := s.Delete(context.TODO(), backend.Key(clusterConfigPrefix, namePrefix))
+func (s *ClusterConfigurationService) DeleteClusterName(ctx context.Context) error {
+	err := s.Delete(ctx, backend.Key(clusterConfigPrefix, namePrefix))
 	if err != nil {
 		if trace.IsNotFound(err) {
 			return trace.NotFound("cluster configuration not found")
@@ -83,24 +83,24 @@ func (s *ClusterConfigurationService) DeleteClusterName() error {
 
 // SetClusterName sets the name of the cluster in the backend. SetClusterName
 // can only be called once on a cluster after which it will return trace.AlreadyExists.
-func (s *ClusterConfigurationService) SetClusterName(c types.ClusterName) error {
+func (s *ClusterConfigurationService) SetClusterName(ctx context.Context, c types.ClusterName) error {
 	// DELETE IN 8.0.0: Move this ClusterID check to ClusterName.CheckAndSetDefaults.
 	if c.GetClusterID() == "" {
 		return trace.BadParameter("cluster ID is required")
 	}
-	return s.ForceSetClusterName(c)
+	return s.ForceSetClusterName(ctx, c)
 }
 
 // ForceSetClusterName creates types.ClusterName on the backend
 // without additional field checks.  To be used only in tests.
 // DELETE IN 8.0.0
-func (s *ClusterConfigurationService) ForceSetClusterName(c types.ClusterName) error {
+func (s *ClusterConfigurationService) ForceSetClusterName(ctx context.Context, c types.ClusterName) error {
 	value, err := services.MarshalClusterName(c)
 	if err != nil {
 		return trace.Wrap(err)
 	}
 
-	_, err = s.Create(context.TODO(), backend.Item{
+	_, err = s.Create(ctx, backend.Item{
 		Key:     backend.Key(clusterConfigPrefix, namePrefix),
 		Value:   value,
 		Expires: c.Expiry(),
@@ -113,7 +113,7 @@ func (s *ClusterConfigurationService) ForceSetClusterName(c types.ClusterName) e
 }
 
 // UpsertClusterName sets the name of the cluster in the backend.
-func (s *ClusterConfigurationService) UpsertClusterName(c types.ClusterName) error {
+func (s *ClusterConfigurationService) UpsertClusterName(ctx context.Context, c types.ClusterName) error {
 	// DELETE IN 8.0.0: Move this ClusterID check to ClusterName.CheckAndSetDefaults.
 	if c.GetClusterID() == "" {
 		return trace.BadParameter("cluster ID is required")
@@ -124,7 +124,7 @@ func (s *ClusterConfigurationService) UpsertClusterName(c types.ClusterName) err
 		return trace.Wrap(err)
 	}
 
-	_, err = s.Put(context.TODO(), backend.Item{
+	_, err = s.Put(ctx, backend.Item{
 		Key:     backend.Key(clusterConfigPrefix, namePrefix),
 		Value:   value,
 		Expires: c.Expiry(),
@@ -138,8 +138,8 @@ func (s *ClusterConfigurationService) UpsertClusterName(c types.ClusterName) err
 }
 
 // GetStaticTokens gets the list of static tokens used to provision nodes.
-func (s *ClusterConfigurationService) GetStaticTokens() (types.StaticTokens, error) {
-	item, err := s.Get(context.TODO(), backend.Key(clusterConfigPrefix, staticTokensPrefix))
+func (s *ClusterConfigurationService) GetStaticTokens(ctx context.Context) (types.StaticTokens, error) {
+	item, err := s.Get(ctx, backend.Key(clusterConfigPrefix, staticTokensPrefix))
 	if err != nil {
 		if trace.IsNotFound(err) {
 			return nil, trace.NotFound("static tokens not found")
@@ -151,12 +151,12 @@ func (s *ClusterConfigurationService) GetStaticTokens() (types.StaticTokens, err
 }
 
 // SetStaticTokens sets the list of static tokens used to provision nodes.
-func (s *ClusterConfigurationService) SetStaticTokens(c types.StaticTokens) error {
+func (s *ClusterConfigurationService) SetStaticTokens(ctx context.Context, c types.StaticTokens) error {
 	value, err := services.MarshalStaticTokens(c)
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	_, err = s.Put(context.TODO(), backend.Item{
+	_, err = s.Put(ctx, backend.Item{
 		Key:     backend.Key(clusterConfigPrefix, staticTokensPrefix),
 		Value:   value,
 		Expires: c.Expiry(),
@@ -170,8 +170,8 @@ func (s *ClusterConfigurationService) SetStaticTokens(c types.StaticTokens) erro
 }
 
 // DeleteStaticTokens deletes static tokens
-func (s *ClusterConfigurationService) DeleteStaticTokens() error {
-	err := s.Delete(context.TODO(), backend.Key(clusterConfigPrefix, staticTokensPrefix))
+func (s *ClusterConfigurationService) DeleteStaticTokens(ctx context.Context) error {
+	err := s.Delete(ctx, backend.Key(clusterConfigPrefix, staticTokensPrefix))
 	if err != nil {
 		if trace.IsNotFound(err) {
 			return trace.NotFound("static tokens are not found")
@@ -235,9 +235,7 @@ func (s *ClusterConfigurationService) DeleteAuthPreference(ctx context.Context) 
 }
 
 // GetClusterConfig gets types.ClusterConfig from the backend.
-func (s *ClusterConfigurationService) GetClusterConfig(opts ...services.MarshalOption) (types.ClusterConfig, error) {
-	ctx := context.TODO()
-
+func (s *ClusterConfigurationService) GetClusterConfig(ctx context.Context, opts ...services.MarshalOption) (types.ClusterConfig, error) {
 	var clusterConfig types.ClusterConfig
 	item, err := s.Get(ctx, backend.Key(clusterConfigPrefix, generalPrefix))
 	if err != nil {
@@ -262,7 +260,7 @@ func (s *ClusterConfigurationService) GetClusterConfig(opts ...services.MarshalO
 	// to provide legacy cluster ID.)
 	// DELETE IN 8.0.0
 	if clusterConfig.GetLegacyClusterID() == "" {
-		clusterName, err := s.GetClusterName()
+		clusterName, err := s.GetClusterName(ctx)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
@@ -272,7 +270,7 @@ func (s *ClusterConfigurationService) GetClusterConfig(opts ...services.MarshalO
 	// To ensure backward compatibility, extend the fetched ClusterConfig
 	// resource with the values that are now stored in ClusterAuditConfig.
 	// DELETE IN 8.0.0
-	auditConfig, err := s.GetClusterAuditConfig(context.TODO())
+	auditConfig, err := s.GetClusterAuditConfig(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -317,8 +315,8 @@ func (s *ClusterConfigurationService) GetClusterConfig(opts ...services.MarshalO
 }
 
 // DeleteClusterConfig deletes types.ClusterConfig from the backend.
-func (s *ClusterConfigurationService) DeleteClusterConfig() error {
-	err := s.Delete(context.TODO(), backend.Key(clusterConfigPrefix, generalPrefix))
+func (s *ClusterConfigurationService) DeleteClusterConfig(ctx context.Context) error {
+	err := s.Delete(ctx, backend.Key(clusterConfigPrefix, generalPrefix))
 	if err != nil {
 		if trace.IsNotFound(err) {
 			return trace.NotFound("cluster configuration not found")
@@ -329,7 +327,7 @@ func (s *ClusterConfigurationService) DeleteClusterConfig() error {
 }
 
 // SetClusterConfig sets types.ClusterConfig on the backend.
-func (s *ClusterConfigurationService) SetClusterConfig(c types.ClusterConfig) error {
+func (s *ClusterConfigurationService) SetClusterConfig(ctx context.Context, c types.ClusterConfig) error {
 	if c.HasAuditConfig() {
 		return trace.BadParameter("cluster config has legacy audit config, call SetClusterAuditConfig to set these fields")
 	}
@@ -346,12 +344,12 @@ func (s *ClusterConfigurationService) SetClusterConfig(c types.ClusterConfig) er
 		return trace.BadParameter("cluster config has legacy cluster ID set, call SetClusterName to set this field")
 	}
 
-	return s.ForceSetClusterConfig(c)
+	return s.ForceSetClusterConfig(ctx, c)
 }
 
 // ForceSetClusterConfig sets types.ClusterConfig on the backend
 // without legacy field checks.  To be used only in tests.
-func (s *ClusterConfigurationService) ForceSetClusterConfig(c types.ClusterConfig) error {
+func (s *ClusterConfigurationService) ForceSetClusterConfig(ctx context.Context, c types.ClusterConfig) error {
 	value, err := services.MarshalClusterConfig(c)
 	if err != nil {
 		return trace.Wrap(err)
@@ -363,7 +361,7 @@ func (s *ClusterConfigurationService) ForceSetClusterConfig(c types.ClusterConfi
 		ID:    c.GetResourceID(),
 	}
 
-	_, err = s.Put(context.TODO(), item)
+	_, err = s.Put(ctx, item)
 	if err != nil {
 		return trace.Wrap(err)
 	}

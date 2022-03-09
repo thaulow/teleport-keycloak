@@ -196,7 +196,7 @@ type mockedUserAPIGetter struct {
 	mockDeleteUser func(ctx context.Context, user string) error
 }
 
-func (m *mockedUserAPIGetter) GetUser(name string, withSecrets bool) (types.User, error) {
+func (m *mockedUserAPIGetter) GetUser(ctx context.Context, name string, withSecrets bool) (types.User, error) {
 	if m.mockGetUser != nil {
 		return m.mockGetUser(name, withSecrets)
 	}
@@ -217,7 +217,7 @@ func (m *mockedUserAPIGetter) UpdateUser(ctx context.Context, user types.User) e
 	return trace.NotImplemented("mockUpdateUser not implemented")
 }
 
-func (m *mockedUserAPIGetter) GetUsers(withSecrets bool) ([]types.User, error) {
+func (m *mockedUserAPIGetter) GetUsers(ctx context.Context, withSecrets bool) ([]types.User, error) {
 	if m.mockGetUsers != nil {
 		return m.mockGetUsers(withSecrets)
 	}

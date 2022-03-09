@@ -544,11 +544,11 @@ func (c *Client) UpdateUser(ctx context.Context, user types.User) error {
 
 // GetUser returns a list of usernames registered in the system.
 // withSecrets controls whether authentication details are returned.
-func (c *Client) GetUser(name string, withSecrets bool) (types.User, error) {
+func (c *Client) GetUser(ctx context.Context, name string, withSecrets bool) (types.User, error) {
 	if name == "" {
 		return nil, trace.BadParameter("missing username")
 	}
-	user, err := c.grpc.GetUser(context.TODO(), &proto.GetUserRequest{
+	user, err := c.grpc.GetUser(ctx, &proto.GetUserRequest{
 		Name:        name,
 		WithSecrets: withSecrets,
 	}, c.callOpts...)
@@ -560,8 +560,8 @@ func (c *Client) GetUser(name string, withSecrets bool) (types.User, error) {
 
 // GetUsers returns a list of users.
 // withSecrets controls whether authentication details are returned.
-func (c *Client) GetUsers(withSecrets bool) ([]types.User, error) {
-	stream, err := c.grpc.GetUsers(context.TODO(), &proto.GetUsersRequest{
+func (c *Client) GetUsers(ctx context.Context, withSecrets bool) ([]types.User, error) {
+	stream, err := c.grpc.GetUsers(ctx, &proto.GetUsersRequest{
 		WithSecrets: withSecrets,
 	}, c.callOpts...)
 	if err != nil {

@@ -85,8 +85,8 @@ type SessionCreds struct {
 }
 
 // AuthenticateUser authenticates user based on the request type
-func (s *Server) AuthenticateUser(req AuthenticateUserRequest) error {
-	mfaDev, err := s.authenticateUser(context.TODO(), req)
+func (s *Server) AuthenticateUser(ctx context.Context, req AuthenticateUserRequest) error {
+	mfaDev, err := s.authenticateUser(ctx, req)
 	event := &apievents.UserLogin{
 		Metadata: apievents.Metadata{
 			Type: events.UserLoginEvent,
@@ -130,7 +130,7 @@ func (s *Server) authenticateUser(ctx context.Context, req AuthenticateUserReque
 		// authenticate using U2F - code checks challenge response
 		// signed by U2F device of the user
 		var mfaDev *types.MFADevice
-		err := s.WithUserLock(req.Username, func() error {
+		err := s.WithUserLock(ctx, req.Username, func() error {
 			var err error
 			mfaDev, err = s.CheckU2FSignResponse(ctx, req.Username, &req.U2F.SignResponse)
 			return err
@@ -150,8 +150,8 @@ func (s *Server) authenticateUser(ctx context.Context, req AuthenticateUserReque
 		return mfaDev, nil
 	case req.OTP != nil:
 		var mfaDev *types.MFADevice
-		err := s.WithUserLock(req.Username, func() error {
-			res, err := s.checkPassword(req.Username, req.OTP.Password, req.OTP.Token)
+		err := s.WithUserLock(ctx, req.Username, func() error {
+			res, err := s.checkPassword(ctx, req.Username, req.OTP.Password, req.OTP.Token)
 			if err != nil {
 				return trace.Wrap(err)
 			}
@@ -190,8 +190,8 @@ func (s *Server) authenticateUser(ctx context.Context, req AuthenticateUserReque
 			log.Warningf("MFA bypass attempt by user %q, access denied.", req.Username)
 			return nil, trace.AccessDenied("missing second factor")
 		}
-		err := s.WithUserLock(req.Username, func() error {
-			return s.checkPasswordWOToken(req.Username, req.Pass.Password)
+		err := s.WithUserLock(ctx, req.Username, func() error {
+			return s.checkPasswordWOToken(ctx, req.Username, req.Pass.Password)
 		})
 		if err != nil {
 			// provide obscure message on purpose, while logging the real
@@ -208,8 +208,7 @@ func (s *Server) authenticateUser(ctx context.Context, req AuthenticateUserReque
 // AuthenticateWebUser authenticates web user, creates and returns a web session
 // if authentication is successful. In case the existing session ID is used to authenticate,
 // returns the existing session instead of creating a new one
-func (s *Server) AuthenticateWebUser(req AuthenticateUserRequest) (types.WebSession, error) {
-	ctx := context.TODO()
+func (s *Server) AuthenticateWebUser(ctx context.Context, req AuthenticateUserRequest) (types.WebSession, error) {
 	authPref, err := s.GetAuthPreference(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -225,7 +224,7 @@ func (s *Server) AuthenticateWebUser(req AuthenticateUserRequest) (types.WebSess
 	}
 
 	if req.Session != nil {
-		session, err := s.GetWebSession(context.TODO(), types.GetWebSessionRequest{
+		session, err := s.GetWebSession(ctx, types.GetWebSessionRequest{
 			User:      req.Username,
 			SessionID: req.Session.ID,
 		})
@@ -235,16 +234,16 @@ func (s *Server) AuthenticateWebUser(req AuthenticateUserRequest) (types.WebSess
 		return session, nil
 	}
 
-	if err := s.AuthenticateUser(req); err != nil {
+	if err := s.AuthenticateUser(ctx, req); err != nil {
 		return nil, trace.Wrap(err)
 	}
 
-	user, err := s.GetUser(req.Username, false)
+	user, err := s.GetUser(ctx, req.Username, false)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
-	sess, err := s.createUserWebSession(context.TODO(), user)
+	sess, err := s.createUserWebSession(ctx, user)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -340,8 +339,7 @@ func AuthoritiesToTrustedCerts(authorities []types.CertAuthority) []TrustedCerts
 
 // AuthenticateSSHUser authenticates an SSH user and returns SSH and TLS
 // certificates for the public key in req.
-func (s *Server) AuthenticateSSHUser(req AuthenticateSSHRequest) (*SSHLoginResponse, error) {
-	ctx := context.TODO()
+func (s *Server) AuthenticateSSHUser(ctx context.Context, req AuthenticateSSHRequest) (*SSHLoginResponse, error) {
 	authPref, err := s.GetAuthPreference(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -351,18 +349,18 @@ func (s *Server) AuthenticateSSHUser(req AuthenticateSSHRequest) (*SSHLoginRespo
 		return nil, trace.AccessDenied(noLocalAuth)
 	}
 
-	clusterName, err := s.GetClusterName()
+	clusterName, err := s.GetClusterName(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
-	if err := s.AuthenticateUser(req.AuthenticateUserRequest); err != nil {
+	if err := s.AuthenticateUser(ctx, req.AuthenticateUserRequest); err != nil {
 		return nil, trace.Wrap(err)
 	}
 
 	// It's safe to extract the roles and traits directly from services.User as
 	// this endpoint is only used for local accounts.
-	user, err := s.GetUser(req.Username, false)
+	user, err := s.GetUser(ctx, req.Username, false)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -372,7 +370,7 @@ func (s *Server) AuthenticateSSHUser(req AuthenticateSSHRequest) (*SSHLoginRespo
 	}
 
 	// Return the host CA for this cluster only.
-	authority, err := s.GetCertAuthority(types.CertAuthID{
+	authority, err := s.GetCertAuthority(ctx, types.CertAuthID{
 		Type:       types.HostCA,
 		DomainName: clusterName.GetClusterName(),
 	}, false)
@@ -383,7 +381,7 @@ func (s *Server) AuthenticateSSHUser(req AuthenticateSSHRequest) (*SSHLoginRespo
 		authority,
 	}
 
-	certs, err := s.generateUserCert(certRequest{
+	certs, err := s.generateUserCert(ctx, certRequest{
 		user:              user,
 		ttl:               req.TTL,
 		publicKey:         req.PublicKey,

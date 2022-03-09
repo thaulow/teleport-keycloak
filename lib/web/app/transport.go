@@ -179,7 +179,7 @@ func websocketsDialer(tr *http.Transport) forward.Dialer {
 // service over the reverse tunnel subsystem.
 func dialFunc(c *transportConfig) func(ctx context.Context, network string, addr string) (net.Conn, error) {
 	return func(ctx context.Context, network string, addr string) (net.Conn, error) {
-		clusterClient, err := c.proxyClient.GetSite(c.identity.RouteToApp.ClusterName)
+		clusterClient, err := c.proxyClient.GetSite(ctx, c.identity.RouteToApp.ClusterName)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
@@ -205,7 +205,7 @@ func configureTLS(c *transportConfig) (*tls.Config, error) {
 	// Configure the pool of certificates that will be used to verify the
 	// identity of the server. This allows the client to verify the identity of
 	// the server it is connecting to.
-	ca, err := c.accessPoint.GetCertAuthority(types.CertAuthID{
+	ca, err := c.accessPoint.GetCertAuthority(context.TODO(), types.CertAuthID{
 		Type:       types.HostCA,
 		DomainName: c.identity.RouteToApp.ClusterName,
 	}, false)

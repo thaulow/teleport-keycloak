@@ -40,8 +40,7 @@ import (
 )
 
 // CreateGithubAuthRequest creates a new request for Github OAuth2 flow
-func (a *Server) CreateGithubAuthRequest(req services.GithubAuthRequest) (*services.GithubAuthRequest, error) {
-	ctx := context.TODO()
+func (a *Server) CreateGithubAuthRequest(ctx context.Context, req services.GithubAuthRequest) (*services.GithubAuthRequest, error) {
 	connector, err := a.Identity.GetGithubConnector(ctx, req.ConnectorID, true)
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -58,7 +57,7 @@ func (a *Server) CreateGithubAuthRequest(req services.GithubAuthRequest) (*servi
 	log.WithFields(logrus.Fields{trace.Component: "github"}).Debugf(
 		"Redirect URL: %v.", req.RedirectURL)
 	req.SetExpiry(a.GetClock().Now().UTC().Add(defaults.GithubAuthRequestTTL))
-	err = a.Identity.CreateGithubAuthRequest(req)
+	err = a.Identity.CreateGithubAuthRequest(ctx, req)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -132,8 +131,8 @@ type githubManager interface {
 }
 
 // ValidateGithubAuthCallback validates Github auth callback redirect
-func (a *Server) ValidateGithubAuthCallback(q url.Values) (*GithubAuthResponse, error) {
-	return validateGithubAuthCallbackHelper(a.closeCtx, a, q, a.emitter)
+func (a *Server) ValidateGithubAuthCallback(ctx context.Context, q url.Values) (*GithubAuthResponse, error) {
+	return validateGithubAuthCallbackHelper(ctx, a, q, a.emitter)
 }
 
 func validateGithubAuthCallbackHelper(ctx context.Context, m githubManager, q url.Values, emitter apievents.Emitter) (*GithubAuthResponse, error) {
@@ -200,7 +199,7 @@ func (a *Server) validateGithubAuthCallback(q url.Values) (*githubAuthResponse, 
 		return nil, trace.OAuth2(oauth2.ErrorInvalidRequest,
 			"missing state query param", q)
 	}
-	req, err := a.Identity.GetGithubAuthRequest(stateToken)
+	req, err := a.Identity.GetGithubAuthRequest(ctx, stateToken)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -279,12 +278,12 @@ func (a *Server) validateGithubAuthCallback(q url.Values) (*githubAuthResponse, 
 
 	// If a public key was provided, sign it and return a certificate.
 	if len(req.PublicKey) != 0 {
-		sshCert, tlsCert, err := a.createSessionCert(user, params.sessionTTL, req.PublicKey, req.Compatibility, req.RouteToCluster, req.KubernetesCluster)
+		sshCert, tlsCert, err := a.createSessionCert(ctx, user, params.sessionTTL, req.PublicKey, req.Compatibility, req.RouteToCluster, req.KubernetesCluster)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
 
-		clusterName, err := a.GetClusterName()
+		clusterName, err := a.GetClusterName(ctx)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
@@ -293,7 +292,7 @@ func (a *Server) validateGithubAuthCallback(q url.Values) (*githubAuthResponse, 
 		re.auth.TLSCert = tlsCert
 
 		// Return the host CA for this cluster only.
-		authority, err := a.GetCertAuthority(types.CertAuthID{
+		authority, err := a.GetCertAuthority(ctx, types.CertAuthID{
 			Type:       types.HostCA,
 			DomainName: clusterName.GetClusterName(),
 		}, false)
@@ -400,7 +399,7 @@ func (a *Server) createGithubUser(p *createUserParams) (types.User, error) {
 		},
 	}
 
-	existingUser, err := a.GetUser(p.username, false)
+	existingUser, err := a.GetUser(context.TODO(), p.username, false)
 	if err != nil && !trace.IsNotFound(err) {
 		return nil, trace.Wrap(err)
 	}

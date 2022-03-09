@@ -698,7 +698,7 @@ func (s *Server) getNamespace() string {
 	return types.ProcessNamespace(s.namespace)
 }
 
-func (s *Server) tunnelWithRoles(ctx *srv.ServerContext) reversetunnel.Tunnel {
+func (s *Server) tunnelWithRoles(ctx *srv.ServerContext) *reversetunnel.TunnelWithRoles {
 	return reversetunnel.NewTunnelWithRoles(s.proxyTun, ctx.Identity.RoleSet, s.authService)
 }
 
@@ -915,7 +915,7 @@ func (s *Server) HandleRequest(r *ssh.Request) {
 // prior to handling any channels or requests.  Currently this callback's only
 // function is to apply session control restrictions.
 func (s *Server) HandleNewConn(ctx context.Context, ccx *sshutils.ConnectionContext) (context.Context, error) {
-	identityContext, err := s.authHandlers.CreateIdentityContext(ccx.ServerConn)
+	identityContext, err := s.authHandlers.CreateIdentityContext(ctx, ccx.ServerConn)
 	if err != nil {
 		return ctx, trace.Wrap(err)
 	}
@@ -942,7 +942,7 @@ func (s *Server) HandleNewConn(ctx context.Context, ccx *sshutils.ConnectionCont
 		},
 	}
 
-	lockTargets, err := srv.ComputeLockTargets(s, identityContext)
+	lockTargets, err := srv.ComputeLockTargets(ctx, s, identityContext)
 	if err != nil {
 		return ctx, trace.Wrap(err)
 	}
@@ -1013,7 +1013,7 @@ func (s *Server) HandleNewConn(ctx context.Context, ccx *sshutils.ConnectionCont
 
 // HandleNewChan is called when new channel is opened
 func (s *Server) HandleNewChan(ctx context.Context, ccx *sshutils.ConnectionContext, nch ssh.NewChannel) {
-	identityContext, err := s.authHandlers.CreateIdentityContext(ccx.ServerConn)
+	identityContext, err := s.authHandlers.CreateIdentityContext(ctx, ccx.ServerConn)
 	if err != nil {
 		rejectChannel(nch, ssh.Prohibited, fmt.Sprintf("Unable to create identity from connection: %v", err))
 		return

@@ -540,7 +540,7 @@ func (f *Forwarder) setupContext(ctx auth.Context, req *http.Request, isRemoteUs
 			return nil, trace.BadParameter("this Teleport process can not dial Kubernetes endpoints in remote Teleport clusters; only proxy_service supports this, make sure a Teleport proxy is first in the request path")
 		}
 
-		targetCluster, err := f.cfg.ReverseTunnelSrv.GetSite(teleportClusterName)
+		targetCluster, err := f.cfg.ReverseTunnelSrv.GetSite(req.Context(), teleportClusterName)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
@@ -559,7 +559,7 @@ func (f *Forwarder) setupContext(ctx auth.Context, req *http.Request, isRemoteUs
 		// Use the local reversetunnel.Site which knows how to dial by serverID
 		// (for "kubernetes_service" connected over a tunnel) and falls back to
 		// direct dial if needed.
-		localCluster, err := f.cfg.ReverseTunnelSrv.GetSite(f.cfg.ClusterName)
+		localCluster, err := f.cfg.ReverseTunnelSrv.GetSite(req.Context(), f.cfg.ClusterName)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
@@ -1690,7 +1690,7 @@ func (f *Forwarder) serializedRequestClientCreds(authContext authContext) (*tls.
 
 func (f *Forwarder) requestCertificate(ctx authContext) (*tls.Config, error) {
 	f.log.Debugf("Requesting K8s cert for %v.", ctx)
-	keyPEM, _, err := f.cfg.Keygen.GenerateKeyPair("")
+	keyPEM, _, err := f.cfg.Keygen.GenerateKeyPair(f.ctx, "")
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -1722,7 +1722,7 @@ func (f *Forwarder) requestCertificate(ctx authContext) (*tls.Config, error) {
 	}
 	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrBytes})
 
-	response, err := f.cfg.AuthClient.ProcessKubeCSR(auth.KubeCSR{
+	response, err := f.cfg.AuthClient.ProcessKubeCSR(f.ctx, auth.KubeCSR{
 		Username:    ctx.User.GetName(),
 		ClusterName: ctx.teleportCluster.name,
 		CSR:         csrPEM,

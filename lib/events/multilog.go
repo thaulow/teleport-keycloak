@@ -67,19 +67,19 @@ func (m *MultiLog) Close() error {
 }
 
 // EmitAuditEventLegacy emits audit event
-func (m *MultiLog) EmitAuditEventLegacy(event Event, fields EventFields) error {
+func (m *MultiLog) EmitAuditEventLegacy(ctx context.Context, event Event, fields EventFields) error {
 	var errors []error
 	for _, log := range m.loggers {
-		errors = append(errors, log.EmitAuditEventLegacy(event, fields))
+		errors = append(errors, log.EmitAuditEventLegacy(ctx, event, fields))
 	}
 	return trace.NewAggregate(errors...)
 }
 
 // UploadSessionRecording uploads session recording to the audit server
-func (m *MultiLog) UploadSessionRecording(rec SessionRecording) error {
+func (m *MultiLog) UploadSessionRecording(ctx context.Context, rec SessionRecording) error {
 	var errors []error
 	for _, log := range m.loggers {
-		errors = append(errors, log.UploadSessionRecording(rec))
+		errors = append(errors, log.UploadSessionRecording(ctx, rec))
 	}
 	return trace.NewAggregate(errors...)
 }
@@ -88,10 +88,10 @@ func (m *MultiLog) UploadSessionRecording(rec SessionRecording) error {
 // This method is no longer necessary as nodes and proxies >= 2.7.0
 // use UploadSessionRecording method.
 // PostSessionSlice sends chunks of recorded session to the event log
-func (m *MultiLog) PostSessionSlice(slice SessionSlice) error {
+func (m *MultiLog) PostSessionSlice(ctx context.Context, slice SessionSlice) error {
 	var errors []error
 	for _, log := range m.loggers {
-		errors = append(errors, log.PostSessionSlice(slice))
+		errors = append(errors, log.PostSessionSlice(ctx, slice))
 	}
 	return trace.NewAggregate(errors...)
 }
@@ -101,9 +101,9 @@ func (m *MultiLog) PostSessionSlice(slice SessionSlice) error {
 // beginning) up to maxBytes bytes.
 //
 // If maxBytes > MaxChunkBytes, it gets rounded down to MaxChunkBytes
-func (m *MultiLog) GetSessionChunk(namespace string, sid session.ID, offsetBytes, maxBytes int) (data []byte, err error) {
+func (m *MultiLog) GetSessionChunk(ctx context.Context, namespace string, sid session.ID, offsetBytes, maxBytes int) (data []byte, err error) {
 	for _, log := range m.loggers {
-		data, err = log.GetSessionChunk(namespace, sid, offsetBytes, maxBytes)
+		data, err = log.GetSessionChunk(ctx, namespace, sid, offsetBytes, maxBytes)
 		if !trace.IsNotImplemented(err) {
 			return data, err
 		}
@@ -118,9 +118,9 @@ func (m *MultiLog) GetSessionChunk(namespace string, sid session.ID, offsetBytes
 //
 // This function is usually used in conjunction with GetSessionReader to
 // replay recorded session streams.
-func (m *MultiLog) GetSessionEvents(namespace string, sid session.ID, after int, fetchPrintEvents bool) (events []EventFields, err error) {
+func (m *MultiLog) GetSessionEvents(ctx context.Context, namespace string, sid session.ID, after int, fetchPrintEvents bool) (events []EventFields, err error) {
 	for _, log := range m.loggers {
-		events, err = log.GetSessionEvents(namespace, sid, after, fetchPrintEvents)
+		events, err = log.GetSessionEvents(ctx, namespace, sid, after, fetchPrintEvents)
 		if !trace.IsNotImplemented(err) {
 			return events, err
 		}
@@ -136,9 +136,9 @@ func (m *MultiLog) GetSessionEvents(namespace string, sid session.ID, after int,
 // The only mandatory requirement is a date range (UTC).
 //
 // This function may never return more than 1 MiB of event data.
-func (m *MultiLog) SearchEvents(fromUTC, toUTC time.Time, namespace string, eventTypes []string, limit int, order types.EventOrder, startKey string) (events []apievents.AuditEvent, lastKey string, err error) {
+func (m *MultiLog) SearchEvents(ctx context.Context, fromUTC, toUTC time.Time, namespace string, eventTypes []string, limit int, order types.EventOrder, startKey string) (events []apievents.AuditEvent, lastKey string, err error) {
 	for _, log := range m.loggers {
-		events, lastKey, err := log.SearchEvents(fromUTC, toUTC, namespace, eventTypes, limit, order, startKey)
+		events, lastKey, err := log.SearchEvents(ctx, fromUTC, toUTC, namespace, eventTypes, limit, order, startKey)
 		if !trace.IsNotImplemented(err) {
 			return events, lastKey, err
 		}
@@ -152,9 +152,9 @@ func (m *MultiLog) SearchEvents(fromUTC, toUTC time.Time, namespace string, even
 //
 // Event types to filter can be specified and pagination is handled by an iterator key that allows
 // a query to be resumed.
-func (m *MultiLog) SearchSessionEvents(fromUTC, toUTC time.Time, limit int, order types.EventOrder, startKey string) (events []apievents.AuditEvent, lastKey string, err error) {
+func (m *MultiLog) SearchSessionEvents(ctx context.Context, fromUTC, toUTC time.Time, limit int, order types.EventOrder, startKey string) (events []apievents.AuditEvent, lastKey string, err error) {
 	for _, log := range m.loggers {
-		events, lastKey, err = log.SearchSessionEvents(fromUTC, toUTC, limit, order, startKey)
+		events, lastKey, err = log.SearchSessionEvents(ctx, fromUTC, toUTC, limit, order, startKey)
 		if !trace.IsNotImplemented(err) {
 			return events, lastKey, err
 		}

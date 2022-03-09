@@ -17,6 +17,7 @@ limitations under the License.
 package client
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"time"
@@ -91,7 +92,7 @@ type Key struct {
 // NewKey generates a new unsigned key. Such key must be signed by a
 // Teleport CA (auth server) before it becomes useful.
 func NewKey() (key *Key, err error) {
-	priv, pub, err := native.GenerateKeyPair("")
+	priv, pub, err := native.GenerateKeyPair(context.TODO(), "")
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

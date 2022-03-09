@@ -153,7 +153,7 @@ func (p *transport) start() {
 	switch dreq.Address {
 	// Connect to an Auth Server.
 	case RemoteAuthServer:
-		authServers, err := p.authClient.GetAuthServers()
+		authServers, err := p.authClient.GetAuthServers(p.closeContext)
 		if err != nil {
 			p.reply(req, false, []byte("connection rejected: failed to connect to auth server"))
 			return
@@ -350,7 +350,7 @@ func (p *transport) tunnelDial(r *sshutils.DialReq) (net.Conn, error) {
 	if p.reverseTunnelServer == nil {
 		return nil, trace.NotFound("not found")
 	}
-	cluster, err := p.reverseTunnelServer.GetSite(p.localClusterName)
+	cluster, err := p.reverseTunnelServer.GetSite(p.closeContext, p.localClusterName)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

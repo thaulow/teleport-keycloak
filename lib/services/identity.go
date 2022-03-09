@@ -37,7 +37,7 @@ import (
 // UserGetter is responsible for getting users
 type UserGetter interface {
 	// GetUser returns a user by name
-	GetUser(user string, withSecrets bool) (types.User, error)
+	GetUser(ctx context.Context, user string, withSecrets bool) (types.User, error)
 }
 
 // UsersService is responsible for basic user management
@@ -46,79 +46,79 @@ type UsersService interface {
 	// UpdateUser updates an existing user.
 	UpdateUser(ctx context.Context, user types.User) error
 	// UpsertUser updates parameters about user
-	UpsertUser(user types.User) error
+	UpsertUser(ctx context.Context, user types.User) error
 	// DeleteUser deletes a user with all the keys from the backend
 	DeleteUser(ctx context.Context, user string) error
 	// GetUsers returns a list of users registered with the local auth server
-	GetUsers(withSecrets bool) ([]types.User, error)
+	GetUsers(ctx context.Context, withSecrets bool) ([]types.User, error)
 	// DeleteAllUsers deletes all users
-	DeleteAllUsers() error
+	DeleteAllUsers(ctx context.Context) error
 }
 
 // Identity is responsible for managing user entries and external identities
 type Identity interface {
 	// CreateUser creates user, only if the user entry does not exist
-	CreateUser(user types.User) error
+	CreateUser(ctx context.Context, user types.User) error
 
 	// UsersService implements most methods
 	UsersService
 
 	// AddUserLoginAttempt logs user login attempt
-	AddUserLoginAttempt(user string, attempt LoginAttempt, ttl time.Duration) error
+	AddUserLoginAttempt(ctx context.Context, user string, attempt LoginAttempt, ttl time.Duration) error
 
 	// GetUserLoginAttempts returns user login attempts
-	GetUserLoginAttempts(user string) ([]LoginAttempt, error)
+	GetUserLoginAttempts(ctx context.Context, user string) ([]LoginAttempt, error)
 
 	// DeleteUserLoginAttempts removes all login attempts of a user. Should be
 	// called after successful login.
-	DeleteUserLoginAttempts(user string) error
+	DeleteUserLoginAttempts(ctx context.Context, user string) error
 
 	// GetUserByOIDCIdentity returns a user by its specified OIDC Identity, returns first
 	// user specified with this identity
-	GetUserByOIDCIdentity(id types.ExternalIdentity) (types.User, error)
+	GetUserByOIDCIdentity(ctx context.Context, id types.ExternalIdentity) (types.User, error)
 
 	// GetUserBySAMLIdentity returns a user by its specified OIDC Identity, returns first
 	// user specified with this identity
-	GetUserBySAMLIdentity(id types.ExternalIdentity) (types.User, error)
+	GetUserBySAMLIdentity(ctx context.Context, id types.ExternalIdentity) (types.User, error)
 
 	// GetUserByGithubIdentity returns a user by its specified Github identity
-	GetUserByGithubIdentity(id types.ExternalIdentity) (types.User, error)
+	GetUserByGithubIdentity(ctx context.Context, id types.ExternalIdentity) (types.User, error)
 
 	// UpsertPasswordHash upserts user password hash
-	UpsertPasswordHash(user string, hash []byte) error
+	UpsertPasswordHash(ctx context.Context, user string, hash []byte) error
 
 	// GetPasswordHash returns the password hash for a given user
-	GetPasswordHash(user string) ([]byte, error)
+	GetPasswordHash(ctx context.Context, user string) ([]byte, error)
 
 	// UpsertHOTP upserts HOTP state for user
 	// Deprecated: HOTP use is deprecated, use UpsertTOTP instead.
-	UpsertHOTP(user string, otp *hotp.HOTP) error
+	UpsertHOTP(ctx context.Context, user string, otp *hotp.HOTP) error
 
 	// GetHOTP gets HOTP token state for a user
 	// Deprecated: HOTP use is deprecated, use GetTOTP instead.
-	GetHOTP(user string) (*hotp.HOTP, error)
+	GetHOTP(ctx context.Context, user string) (*hotp.HOTP, error)
 
 	// UpsertUsedTOTPToken upserts a TOTP token to the backend so it can't be used again
 	// during the 30 second window it's valid.
-	UpsertUsedTOTPToken(user string, otpToken string) error
+	UpsertUsedTOTPToken(ctx context.Context, user string, otpToken string) error
 
 	// GetUsedTOTPToken returns the last successfully used TOTP token.
-	GetUsedTOTPToken(user string) (string, error)
+	GetUsedTOTPToken(ctx context.Context, user string) (string, error)
 
 	// UpsertPassword upserts new password and OTP token
-	UpsertPassword(user string, password []byte) error
+	UpsertPassword(ctx context.Context, user string, password []byte) error
 
 	// UpsertU2FRegisterChallenge upserts a U2F challenge for a new user corresponding to the token
-	UpsertU2FRegisterChallenge(token string, u2fChallenge *u2f.Challenge) error
+	UpsertU2FRegisterChallenge(ctx context.Context, token string, u2fChallenge *u2f.Challenge) error
 
 	// GetU2FRegisterChallenge returns a U2F challenge for a new user corresponding to the token
-	GetU2FRegisterChallenge(token string) (*u2f.Challenge, error)
+	GetU2FRegisterChallenge(ctx context.Context, token string) (*u2f.Challenge, error)
 
 	// UpsertU2FSignChallenge upserts a U2F sign (auth) challenge
-	UpsertU2FSignChallenge(user string, u2fChallenge *u2f.Challenge) error
+	UpsertU2FSignChallenge(ctx context.Context, user string, u2fChallenge *u2f.Challenge) error
 
 	// GetU2FSignChallenge returns a U2F sign (auth) challenge
-	GetU2FSignChallenge(user string) (*u2f.Challenge, error)
+	GetU2FSignChallenge(ctx context.Context, user string) (*u2f.Challenge, error)
 
 	// UpsertMFADevice upserts an MFA device for the user.
 	UpsertMFADevice(ctx context.Context, user string, d *types.MFADevice) error
@@ -142,13 +142,13 @@ type Identity interface {
 	GetOIDCConnectors(ctx context.Context, withSecrets bool) ([]types.OIDCConnector, error)
 
 	// CreateOIDCAuthRequest creates new auth request
-	CreateOIDCAuthRequest(req OIDCAuthRequest, ttl time.Duration) error
+	CreateOIDCAuthRequest(ctx context.Context, req OIDCAuthRequest, ttl time.Duration) error
 
 	// GetOIDCAuthRequest returns OIDC auth request if found
-	GetOIDCAuthRequest(stateToken string) (*OIDCAuthRequest, error)
+	GetOIDCAuthRequest(ctx context.Context, stateToken string) (*OIDCAuthRequest, error)
 
 	// CreateSAMLConnector creates SAML Connector
-	CreateSAMLConnector(connector types.SAMLConnector) error
+	CreateSAMLConnector(ctx context.Context, connector types.SAMLConnector) error
 
 	// UpsertSAMLConnector upserts SAML Connector
 	UpsertSAMLConnector(ctx context.Context, connector types.SAMLConnector) error
@@ -163,13 +163,13 @@ type Identity interface {
 	GetSAMLConnectors(ctx context.Context, withSecrets bool) ([]types.SAMLConnector, error)
 
 	// CreateSAMLAuthRequest creates new auth request
-	CreateSAMLAuthRequest(req SAMLAuthRequest, ttl time.Duration) error
+	CreateSAMLAuthRequest(ctx context.Context, req SAMLAuthRequest, ttl time.Duration) error
 
 	// GetSAMLAuthRequest returns OSAML auth request if found
-	GetSAMLAuthRequest(id string) (*SAMLAuthRequest, error)
+	GetSAMLAuthRequest(ctx context.Context, id string) (*SAMLAuthRequest, error)
 
 	// CreateGithubConnector creates a new Github connector
-	CreateGithubConnector(connector types.GithubConnector) error
+	CreateGithubConnector(ctx context.Context, connector types.GithubConnector) error
 
 	// UpsertGithubConnector creates or updates a new Github connector
 	UpsertGithubConnector(ctx context.Context, connector types.GithubConnector) error
@@ -184,10 +184,10 @@ type Identity interface {
 	DeleteGithubConnector(ctx context.Context, name string) error
 
 	// CreateGithubAuthRequest creates a new auth request for Github OAuth2 flow
-	CreateGithubAuthRequest(req GithubAuthRequest) error
+	CreateGithubAuthRequest(ctx context.Context, req GithubAuthRequest) error
 
 	// GetGithubAuthRequest retrieves Github auth request by the token
-	GetGithubAuthRequest(stateToken string) (*GithubAuthRequest, error)
+	GetGithubAuthRequest(ctx context.Context, stateToken string) (*GithubAuthRequest, error)
 
 	// CreateResetPasswordToken creates a token
 	CreateResetPasswordToken(ctx context.Context, resetPasswordToken types.ResetPasswordToken) (types.ResetPasswordToken, error)

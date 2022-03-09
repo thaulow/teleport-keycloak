@@ -54,7 +54,7 @@ func (h *Handler) newSession(ctx context.Context, ws types.WebSession) (*session
 
 	// Query the cluster this application is running in to find the public
 	// address and cluster name pair which will be encoded into the certificate.
-	clusterClient, err := h.c.ProxyClient.GetSite(identity.RouteToApp.ClusterName)
+	clusterClient, err := h.c.ProxyClient.GetSite(ctx, identity.RouteToApp.ClusterName)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

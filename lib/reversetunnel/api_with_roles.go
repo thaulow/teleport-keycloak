@@ -17,6 +17,8 @@ limitations under the License.
 package reversetunnel
 
 import (
+	"context"
+
 	"github.com/gravitational/teleport/lib/auth"
 	"github.com/gravitational/teleport/lib/services"
 	"github.com/gravitational/teleport/lib/utils"
@@ -45,8 +47,8 @@ type TunnelWithRoles struct {
 }
 
 // GetSites returns a list of connected remote sites
-func (t *TunnelWithRoles) GetSites() ([]RemoteSite, error) {
-	clusters, err := t.tunnel.GetSites()
+func (t *TunnelWithRoles) GetSites(ctx context.Context) ([]RemoteSite, error) {
+	clusters, err := t.tunnel.GetSites(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -56,7 +58,7 @@ func (t *TunnelWithRoles) GetSites() ([]RemoteSite, error) {
 			out = append(out, cluster)
 			continue
 		}
-		rc, err := t.ap.GetRemoteCluster(cluster.GetName())
+		rc, err := t.ap.GetRemoteCluster(ctx, cluster.GetName())
 		if err != nil {
 			if !trace.IsNotFound(err) {
 				return nil, trace.Wrap(err)
@@ -76,15 +78,15 @@ func (t *TunnelWithRoles) GetSites() ([]RemoteSite, error) {
 }
 
 // GetSite returns remote site this node belongs to
-func (t *TunnelWithRoles) GetSite(clusterName string) (RemoteSite, error) {
-	cluster, err := t.tunnel.GetSite(clusterName)
+func (t *TunnelWithRoles) GetSite(ctx context.Context, clusterName string) (RemoteSite, error) {
+	cluster, err := t.tunnel.GetSite(ctx, clusterName)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 	if _, ok := cluster.(*localSite); ok {
 		return cluster, nil
 	}
-	rc, err := t.ap.GetRemoteCluster(clusterName)
+	rc, err := t.ap.GetRemoteCluster(ctx, clusterName)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

@@ -177,7 +177,7 @@ func checkPendingTime(iid *imds.InstanceIdentityDocument, provisionToken types.P
 }
 
 func nodeExists(ctx context.Context, presence services.Presence, hostID string) (bool, error) {
-	namespaces, err := presence.GetNamespaces()
+	namespaces, err := presence.GetNamespaces(ctx)
 	if err != nil {
 		return false, trace.Wrap(err)
 	}
@@ -195,7 +195,7 @@ func nodeExists(ctx context.Context, presence services.Presence, hostID string) 
 }
 
 func proxyExists(ctx context.Context, presence services.Presence, hostID string) (bool, error) {
-	proxies, err := presence.GetProxies()
+	proxies, err := presence.GetProxies(ctx)
 	if err != nil {
 		return false, trace.Wrap(err)
 	}
@@ -221,7 +221,7 @@ func kubeExists(ctx context.Context, presence services.Presence, hostID string) 
 }
 
 func appExists(ctx context.Context, presence services.Presence, hostID string) (bool, error) {
-	namespaces, err := presence.GetNamespaces()
+	namespaces, err := presence.GetNamespaces(ctx)
 	if err != nil {
 		return false, trace.Wrap(err)
 	}
@@ -240,7 +240,7 @@ func appExists(ctx context.Context, presence services.Presence, hostID string) (
 }
 
 func dbExists(ctx context.Context, presence services.Presence, hostID string) (bool, error) {
-	namespaces, err := presence.GetNamespaces()
+	namespaces, err := presence.GetNamespaces(ctx)
 	if err != nil {
 		return false, trace.Wrap(err)
 	}

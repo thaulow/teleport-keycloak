@@ -44,20 +44,20 @@ func NewWithClock(clock clockwork.Clock) *Keygen {
 	return &Keygen{Keygen: inner, clock: clock}
 }
 
-func (n *Keygen) GetNewKeyPairFromPool() ([]byte, []byte, error) {
-	return n.GenerateKeyPair("")
+func (n *Keygen) GetNewKeyPairFromPool(ctx context.Context) ([]byte, []byte, error) {
+	return n.GenerateKeyPair(ctx, "")
 }
 
-func (n *Keygen) GenerateKeyPair(passphrase string) ([]byte, []byte, error) {
+func (n *Keygen) GenerateKeyPair(ctx context.Context, passphrase string) ([]byte, []byte, error) {
 	randomKey := testPairs[(random.Int() % len(testPairs))]
 	return randomKey.Priv, randomKey.Pub, nil
 }
 
-func (n *Keygen) GenerateHostCert(c services.HostCertParams) ([]byte, error) {
+func (n *Keygen) GenerateHostCert(ctx context.Context, c services.HostCertParams) ([]byte, error) {
 	return n.GenerateHostCertWithoutValidation(c)
 }
 
-func (n *Keygen) GenerateUserCert(c services.UserCertParams) ([]byte, error) {
+func (n *Keygen) GenerateUserCert(ctx context.Context, c services.UserCertParams) ([]byte, error) {
 	return n.GenerateUserCertWithoutValidation(c)
 }
 

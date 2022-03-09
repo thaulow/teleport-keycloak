@@ -40,8 +40,8 @@ func NewAccessService(backend backend.Backend) *AccessService {
 }
 
 // DeleteAllRoles deletes all roles
-func (s *AccessService) DeleteAllRoles() error {
-	return s.DeleteRange(context.TODO(), backend.Key(rolesPrefix), backend.RangeEnd(backend.Key(rolesPrefix)))
+func (s *AccessService) DeleteAllRoles(ctx context.Context) error {
+	return s.DeleteRange(ctx, backend.Key(rolesPrefix), backend.RangeEnd(backend.Key(rolesPrefix)))
 }
 
 // GetRoles returns a list of roles registered with the local auth server
@@ -64,7 +64,7 @@ func (s *AccessService) GetRoles(ctx context.Context) ([]types.Role, error) {
 }
 
 // CreateRole creates a role on the backend.
-func (s *AccessService) CreateRole(role types.Role) error {
+func (s *AccessService) CreateRole(ctx context.Context, role types.Role) error {
 	value, err := services.MarshalRole(role)
 	if err != nil {
 		return trace.Wrap(err)
@@ -76,7 +76,7 @@ func (s *AccessService) CreateRole(role types.Role) error {
 		Expires: role.Expiry(),
 	}
 
-	_, err = s.Create(context.TODO(), item)
+	_, err = s.Create(ctx, item)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -157,7 +157,7 @@ func (s *AccessService) GetLocks(ctx context.Context, inForceOnly bool, targets 
 		return nil, trace.Wrap(err)
 	}
 
-	out := []types.Lock{}
+	var out []types.Lock
 	for _, item := range result.Items {
 		lock, err := services.UnmarshalLock(item.Value, services.WithResourceID(item.ID), services.WithExpires(item.Expires))
 		if err != nil {

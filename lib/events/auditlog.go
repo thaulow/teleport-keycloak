@@ -334,20 +334,20 @@ func (l *SessionRecording) CheckAndSetDefaults() error {
 
 // UploadSessionRecording persists the session recording locally or to third
 // party storage.
-func (l *AuditLog) UploadSessionRecording(r SessionRecording) error {
+func (l *AuditLog) UploadSessionRecording(ctx context.Context, r SessionRecording) error {
 	if err := r.CheckAndSetDefaults(); err != nil {
 		return trace.Wrap(err)
 	}
 
 	// Upload session recording to endpoint defined in file configuration. Like S3.
 	start := time.Now()
-	url, err := l.UploadHandler.Upload(context.TODO(), r.SessionID, r.Recording)
+	url, err := l.UploadHandler.Upload(ctx, r.SessionID, r.Recording)
 	if err != nil {
 		l.log.WithFields(log.Fields{"duration": time.Since(start), "session-id": r.SessionID}).Warningf("Session upload failed: %v", trace.DebugReport(err))
 		return trace.Wrap(err)
 	}
 	l.log.WithFields(log.Fields{"duration": time.Since(start), "session-id": r.SessionID}).Debugf("Session upload completed.")
-	return l.EmitAuditEventLegacy(SessionUploadE, EventFields{
+	return l.EmitAuditEventLegacy(ctx, SessionUploadE, EventFields{
 		SessionEventID: string(r.SessionID),
 		URL:            url,
 		EventIndex:     SessionUploadIndex,
@@ -355,7 +355,7 @@ func (l *AuditLog) UploadSessionRecording(r SessionRecording) error {
 }
 
 // PostSessionSlice submits slice of session chunks to the audit log server.
-func (l *AuditLog) PostSessionSlice(slice SessionSlice) error {
+func (l *AuditLog) PostSessionSlice(ctx context.Context, slice SessionSlice) error {
 	if slice.Namespace == "" {
 		return trace.BadParameter("missing parameter Namespace")
 	}
@@ -363,7 +363,7 @@ func (l *AuditLog) PostSessionSlice(slice SessionSlice) error {
 		return trace.BadParameter("missing session chunks")
 	}
 	if l.ExternalLog != nil {
-		return l.ExternalLog.PostSessionSlice(slice)
+		return l.ExternalLog.PostSessionSlice(ctx, slice)
 	}
 	if slice.Version < V3 {
 		return trace.BadParameter("audit log rejected %v log entry, upgrade your components.", slice.Version)
@@ -371,10 +371,10 @@ func (l *AuditLog) PostSessionSlice(slice SessionSlice) error {
 	// V3 API does not write session log to local session directory,
 	// instead it writes locally, this internal method captures
 	// non-print events to the global audit log
-	return l.processSlice(nil, &slice)
+	return l.processSlice(ctx, nil, &slice)
 }
 
-func (l *AuditLog) processSlice(sl SessionLogger, slice *SessionSlice) error {
+func (l *AuditLog) processSlice(ctx context.Context, sl SessionLogger, slice *SessionSlice) error {
 	for _, chunk := range slice.Chunks {
 		if chunk.EventType == SessionPrintEvent || chunk.EventType == "" {
 			continue
@@ -383,7 +383,7 @@ func (l *AuditLog) processSlice(sl SessionLogger, slice *SessionSlice) error {
 		if err != nil {
 			return trace.Wrap(err)
 		}
-		if err := l.EmitAuditEventLegacy(Event{Name: chunk.EventType}, fields); err != nil {
+		if err := l.EmitAuditEventLegacy(ctx, Event{Name: chunk.EventType}, fields); err != nil {
 			return trace.Wrap(err)
 		}
 	}
@@ -733,7 +733,7 @@ func (l *AuditLog) downloadSession(namespace string, sid session.ID) error {
 // GetSessionChunk returns a reader which console and web clients request
 // to receive a live stream of a given session. The reader allows access to a
 // session stream range from offsetBytes to offsetBytes+maxBytes
-func (l *AuditLog) GetSessionChunk(namespace string, sid session.ID, offsetBytes, maxBytes int) ([]byte, error) {
+func (l *AuditLog) GetSessionChunk(ctx context.Context, namespace string, sid session.ID, offsetBytes, maxBytes int) ([]byte, error) {
 	if err := l.downloadSession(namespace, sid); err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -884,7 +884,7 @@ func (l *AuditLog) getSessionChunk(namespace string, sid session.ID, offsetBytes
 //
 // This function is usually used in conjunction with GetSessionReader to
 // replay recorded session streams.
-func (l *AuditLog) GetSessionEvents(namespace string, sid session.ID, afterN int, includePrintEvents bool) ([]EventFields, error) {
+func (l *AuditLog) GetSessionEvents(ctx context.Context, namespace string, sid session.ID, afterN int, includePrintEvents bool) ([]EventFields, error) {
 	l.log.WithFields(log.Fields{"sid": string(sid), "afterN": afterN, "printEvents": includePrintEvents}).Debugf("GetSessionEvents.")
 	if namespace == "" {
 		return nil, trace.BadParameter("missing parameter namespace")
@@ -892,7 +892,7 @@ func (l *AuditLog) GetSessionEvents(namespace string, sid session.ID, afterN int
 	// Print events are stored in the context of the downloaded session
 	// so pull them
 	if !includePrintEvents && l.ExternalLog != nil {
-		events, err := l.ExternalLog.GetSessionEvents(namespace, sid, afterN, includePrintEvents)
+		events, err := l.ExternalLog.GetSessionEvents(ctx, namespace, sid, afterN, includePrintEvents)
 		// some loggers (e.g. FileLog) do not support retrieving session only print events,
 		// in this case rely on local fallback to download the session,
 		// unpack it and use local search
@@ -983,10 +983,10 @@ func (l *AuditLog) EmitAuditEvent(ctx context.Context, event apievents.AuditEven
 
 // EmitAuditEventLegacy adds a new event to the log. If emitting fails, a Prometheus
 // counter is incremented.
-func (l *AuditLog) EmitAuditEventLegacy(event Event, fields EventFields) error {
+func (l *AuditLog) EmitAuditEventLegacy(ctx context.Context, event Event, fields EventFields) error {
 	// If an external logger has been set, use it as the emitter, otherwise
 	// fallback to the local disk based emitter.
-	var emitAuditEvent func(event Event, fields EventFields) error
+	var emitAuditEvent func(ctx context.Context, event Event, fields EventFields) error
 	if l.ExternalLog != nil {
 		emitAuditEvent = l.ExternalLog.EmitAuditEventLegacy
 	} else {
@@ -995,7 +995,7 @@ func (l *AuditLog) EmitAuditEventLegacy(event Event, fields EventFields) error {
 
 	// Emit the event. If it fails for any reason a Prometheus counter is
 	// incremented.
-	err := emitAuditEvent(event, fields)
+	err := emitAuditEvent(ctx, event, fields)
 	if err != nil {
 		AuditFailedEmit.Inc()
 		return trace.Wrap(err)
@@ -1018,7 +1018,7 @@ func (l *AuditLog) auditDirs() ([]string, error) {
 	return out, nil
 }
 
-func (l *AuditLog) SearchEvents(fromUTC, toUTC time.Time, namespace string, eventType []string, limit int, order types.EventOrder, startKey string) ([]apievents.AuditEvent, string, error) {
+func (l *AuditLog) SearchEvents(ctx context.Context, fromUTC, toUTC time.Time, namespace string, eventType []string, limit int, order types.EventOrder, startKey string) ([]apievents.AuditEvent, string, error) {
 	g := l.log.WithFields(log.Fields{"namespace": namespace, "eventType": eventType, "limit": limit})
 	g.Debugf("SearchEvents(%v, %v)", fromUTC, toUTC)
 	if limit <= 0 {
@@ -1028,18 +1028,18 @@ func (l *AuditLog) SearchEvents(fromUTC, toUTC time.Time, namespace string, even
 		return nil, "", trace.BadParameter("limit %v exceeds max iteration limit %v", limit, defaults.MaxIterationLimit)
 	}
 	if l.ExternalLog != nil {
-		return l.ExternalLog.SearchEvents(fromUTC, toUTC, namespace, eventType, limit, order, startKey)
+		return l.ExternalLog.SearchEvents(ctx, fromUTC, toUTC, namespace, eventType, limit, order, startKey)
 	}
-	return l.localLog.SearchEvents(fromUTC, toUTC, namespace, eventType, limit, order, startKey)
+	return l.localLog.SearchEvents(ctx, fromUTC, toUTC, namespace, eventType, limit, order, startKey)
 }
 
-func (l *AuditLog) SearchSessionEvents(fromUTC, toUTC time.Time, limit int, order types.EventOrder, startKey string) ([]apievents.AuditEvent, string, error) {
+func (l *AuditLog) SearchSessionEvents(ctx context.Context, fromUTC, toUTC time.Time, limit int, order types.EventOrder, startKey string) ([]apievents.AuditEvent, string, error) {
 	l.log.Debugf("SearchSessionEvents(%v, %v, %v)", fromUTC, toUTC, limit)
 
 	if l.ExternalLog != nil {
-		return l.ExternalLog.SearchSessionEvents(fromUTC, toUTC, limit, order, startKey)
+		return l.ExternalLog.SearchSessionEvents(ctx, fromUTC, toUTC, limit, order, startKey)
 	}
-	return l.localLog.SearchSessionEvents(fromUTC, toUTC, limit, order, startKey)
+	return l.localLog.SearchSessionEvents(ctx, fromUTC, toUTC, limit, order, startKey)
 }
 
 // StreamSessionEvents streams all events from a given session recording. An error is returned on the first
@@ -1277,7 +1277,7 @@ const loggerClosedMessage = "the logger has been closed"
 
 type closedLogger struct{}
 
-func (a *closedLogger) EmitAuditEventLegacy(e Event, f EventFields) error {
+func (a *closedLogger) EmitAuditEventLegacy(ctx context.Context, e Event, f EventFields) error {
 	return trace.NotImplemented(loggerClosedMessage)
 }
 
@@ -1285,27 +1285,27 @@ func (a *closedLogger) EmitAuditEvent(ctx context.Context, e apievents.AuditEven
 	return trace.NotImplemented(loggerClosedMessage)
 }
 
-func (a *closedLogger) PostSessionSlice(s SessionSlice) error {
+func (a *closedLogger) PostSessionSlice(ctx context.Context, s SessionSlice) error {
 	return trace.NotImplemented(loggerClosedMessage)
 }
 
-func (a *closedLogger) UploadSessionRecording(r SessionRecording) error {
+func (a *closedLogger) UploadSessionRecording(ctx context.Context, r SessionRecording) error {
 	return trace.NotImplemented(loggerClosedMessage)
 }
 
-func (a *closedLogger) GetSessionChunk(namespace string, sid session.ID, offsetBytes int, maxBytes int) ([]byte, error) {
+func (a *closedLogger) GetSessionChunk(ctx context.Context, namespace string, sid session.ID, offsetBytes int, maxBytes int) ([]byte, error) {
 	return nil, trace.NotImplemented(loggerClosedMessage)
 }
 
-func (a *closedLogger) GetSessionEvents(namespace string, sid session.ID, after int, includePrintEvents bool) ([]EventFields, error) {
+func (a *closedLogger) GetSessionEvents(ctx context.Context, namespace string, sid session.ID, after int, includePrintEvents bool) ([]EventFields, error) {
 	return nil, trace.NotImplemented(loggerClosedMessage)
 }
 
-func (a *closedLogger) SearchEvents(fromUTC, toUTC time.Time, namespace string, eventType []string, limit int, order types.EventOrder, startKey string) ([]apievents.AuditEvent, string, error) {
+func (a *closedLogger) SearchEvents(ctx context.Context, fromUTC, toUTC time.Time, namespace string, eventType []string, limit int, order types.EventOrder, startKey string) ([]apievents.AuditEvent, string, error) {
 	return nil, "", trace.NotImplemented(loggerClosedMessage)
 }
 
-func (a *closedLogger) SearchSessionEvents(fromUTC time.Time, toUTC time.Time, limit int, order types.EventOrder, startKey string) ([]apievents.AuditEvent, string, error) {
+func (a *closedLogger) SearchSessionEvents(ctx context.Context, fromUTC time.Time, toUTC time.Time, limit int, order types.EventOrder, startKey string) ([]apievents.AuditEvent, string, error) {
 	return nil, "", trace.NotImplemented(loggerClosedMessage)
 }
 

@@ -17,6 +17,7 @@ limitations under the License.
 package events
 
 import (
+	"context"
 	"encoding/json"
 	"sync"
 	"time"
@@ -118,7 +119,7 @@ func (l *Forwarder) Close() error {
 }
 
 // EmitAuditEventLegacy emits audit event
-func (l *Forwarder) EmitAuditEventLegacy(event Event, fields EventFields) error {
+func (l *Forwarder) EmitAuditEventLegacy(ctx context.Context, event Event, fields EventFields) error {
 	err := UpdateEventFields(event, fields, l.Clock, l.UID)
 	if err != nil {
 		return trace.Wrap(err)
@@ -134,7 +135,7 @@ func (l *Forwarder) EmitAuditEventLegacy(event Event, fields EventFields) error 
 			Time:      time.Now().UTC().UnixNano(),
 		},
 	}
-	return l.PostSessionSlice(SessionSlice{
+	return l.PostSessionSlice(ctx, SessionSlice{
 		Namespace: l.Namespace,
 		SessionID: string(l.SessionID),
 		Version:   V3,
@@ -143,7 +144,7 @@ func (l *Forwarder) EmitAuditEventLegacy(event Event, fields EventFields) error 
 }
 
 // PostSessionSlice sends chunks of recorded session to the event log
-func (l *Forwarder) PostSessionSlice(slice SessionSlice) error {
+func (l *Forwarder) PostSessionSlice(ctx context.Context, slice SessionSlice) error {
 	// setup slice sets slice version, properly numerates
 	// all chunks and
 	chunksWithoutPrintEvents, err := l.setupSlice(&slice)
@@ -163,7 +164,7 @@ func (l *Forwarder) PostSessionSlice(slice SessionSlice) error {
 	}
 	slice.Chunks = chunksWithoutPrintEvents
 	slice.Version = V3
-	err = l.IAuditLog.PostSessionSlice(slice)
+	err = l.IAuditLog.PostSessionSlice(ctx, slice)
 	return err
 }
 

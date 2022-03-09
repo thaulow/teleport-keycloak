@@ -404,7 +404,7 @@ func (p *clusterConfigParser) parse(event backend.Event) (types.Resource, error)
 		// resource passed with the event but perform a separate get from the
 		// backend. The resource fetched in this way is populated with all the
 		// fields expected by legacy event consumers.  DELETE IN 8.0.0
-		clusterConfig, err := p.getClusterConfig()
+		clusterConfig, err := p.getClusterConfig(context.TODO())
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
@@ -1206,4 +1206,4 @@ func baseTwoKeys(key []byte) (string, string, error) {
 
 // getClusterConfigFunc gets ClusterConfig to facilitate backward compatible
 // transition to standalone configuration resources.  DELETE IN 8.0.0
-type getClusterConfigFunc func(...services.MarshalOption) (types.ClusterConfig, error)
+type getClusterConfigFunc func(context.Context, ...services.MarshalOption) (types.ClusterConfig, error)

@@ -486,7 +486,7 @@ func (l *Log) EmitAuditEvent(ctx context.Context, in apievents.AuditEvent) error
 }
 
 // EmitAuditEventLegacy emits audit event
-func (l *Log) EmitAuditEventLegacy(ev events.Event, fields events.EventFields) error {
+func (l *Log) EmitAuditEventLegacy(ctx context.Context, ev events.Event, fields events.EventFields) error {
 	sessionID := fields.GetString(events.SessionEventID)
 	eventIndex := fields.GetInt(events.EventIndex)
 	// no session id - global event gets a random uuid to get a good partition
@@ -524,7 +524,7 @@ func (l *Log) EmitAuditEventLegacy(ev events.Event, fields events.EventFields) e
 		Item:      av,
 		TableName: aws.String(l.Tablename),
 	}
-	_, err = l.svc.PutItem(&input)
+	_, err = l.svc.PutItemWithContext(ctx, &input)
 	err = convertError(err)
 	if err != nil {
 		return trace.Wrap(err)
@@ -540,7 +540,7 @@ func (l *Log) setExpiry(e *event) {
 }
 
 // PostSessionSlice sends chunks of recorded session to the event log
-func (l *Log) PostSessionSlice(slice events.SessionSlice) error {
+func (l *Log) PostSessionSlice(ctx context.Context, slice events.SessionSlice) error {
 	var requests []*dynamodb.WriteRequest
 	for _, chunk := range slice.Chunks {
 		// if legacy event with no type or print event, skip it
@@ -596,7 +596,7 @@ func (l *Log) PostSessionSlice(slice events.SessionSlice) error {
 	return nil
 }
 
-func (l *Log) UploadSessionRecording(events.SessionRecording) error {
+func (l *Log) UploadSessionRecording(context.Context, events.SessionRecording) error {
 	return trace.BadParameter("not supported")
 }
 
@@ -605,7 +605,7 @@ func (l *Log) UploadSessionRecording(events.SessionRecording) error {
 // beginning) up to maxBytes bytes.
 //
 // If maxBytes > MaxChunkBytes, it gets rounded down to MaxChunkBytes
-func (l *Log) GetSessionChunk(namespace string, sid session.ID, offsetBytes, maxBytes int) ([]byte, error) {
+func (l *Log) GetSessionChunk(ctx context.Context, namespace string, sid session.ID, offsetBytes, maxBytes int) ([]byte, error) {
 	return nil, nil
 }
 
@@ -616,7 +616,7 @@ func (l *Log) GetSessionChunk(namespace string, sid session.ID, offsetBytes, max
 //
 // This function is usually used in conjunction with GetSessionReader to
 // replay recorded session streams.
-func (l *Log) GetSessionEvents(namespace string, sid session.ID, after int, inlcudePrintEvents bool) ([]events.EventFields, error) {
+func (l *Log) GetSessionEvents(ctx context.Context, namespace string, sid session.ID, after int, inlcudePrintEvents bool) ([]events.EventFields, error) {
 	var values []events.EventFields
 	query := "SessionID = :sessionID AND EventIndex >= :eventIndex"
 	attributes := map[string]interface{}{
@@ -632,7 +632,7 @@ func (l *Log) GetSessionEvents(namespace string, sid session.ID, after int, inlc
 		TableName:                 aws.String(l.Tablename),
 		ExpressionAttributeValues: attributeValues,
 	}
-	out, err := l.svc.Query(&input)
+	out, err := l.svc.QueryWithContext(ctx, &input)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -692,8 +692,8 @@ type checkpointKey struct {
 // The only mandatory requirement is a date range (UTC).
 //
 // This function may never return more than 1 MiB of event data.
-func (l *Log) SearchEvents(fromUTC, toUTC time.Time, namespace string, eventTypes []string, limit int, order types.EventOrder, startKey string) ([]apievents.AuditEvent, string, error) {
-	rawEvents, lastKey, err := l.searchEventsRaw(fromUTC, toUTC, namespace, eventTypes, limit, order, startKey)
+func (l *Log) SearchEvents(ctx context.Context, fromUTC, toUTC time.Time, namespace string, eventTypes []string, limit int, order types.EventOrder, startKey string) ([]apievents.AuditEvent, string, error) {
+	rawEvents, lastKey, err := l.searchEventsRaw(ctx, fromUTC, toUTC, namespace, eventTypes, limit, order, startKey)
 	if err != nil {
 		return nil, "", trace.Wrap(err)
 	}
@@ -779,7 +779,7 @@ func reverseStrings(slice []string) []string {
 
 // searchEventsRaw is a low level function for searching for events. This is kept
 // separate from the SearchEvents function in order to allow tests to grab more metadata.
-func (l *Log) searchEventsRaw(fromUTC, toUTC time.Time, namespace string, eventTypes []string, limit int, order types.EventOrder, startKey string) ([]event, string, error) {
+func (l *Log) searchEventsRaw(ctx context.Context, fromUTC, toUTC time.Time, namespace string, eventTypes []string, limit int, order types.EventOrder, startKey string) ([]event, string, error) {
 	if !l.readyForQuery.Load() {
 		return nil, "", trace.Wrap(notReadyYetError{})
 	}
@@ -873,7 +873,7 @@ dateLoop:
 			}
 
 			start := time.Now()
-			out, err := l.svc.Query(&input)
+			out, err := l.svc.QueryWithContext(ctx, &input)
 			if err != nil {
 				return nil, "", trace.Wrap(err)
 			}
@@ -963,13 +963,13 @@ func getSubPageCheckpoint(e *event) (string, error) {
 
 // SearchSessionEvents returns session related events only. This is used to
 // find completed session.
-func (l *Log) SearchSessionEvents(fromUTC time.Time, toUTC time.Time, limit int, order types.EventOrder, startKey string) ([]apievents.AuditEvent, string, error) {
+func (l *Log) SearchSessionEvents(ctx context.Context, fromUTC time.Time, toUTC time.Time, limit int, order types.EventOrder, startKey string) ([]apievents.AuditEvent, string, error) {
 	// only search for specific event types
 	query := []string{
 		events.SessionStartEvent,
 		events.SessionEndEvent,
 	}
-	return l.SearchEvents(fromUTC, toUTC, apidefaults.Namespace, query, limit, order, startKey)
+	return l.SearchEvents(ctx, fromUTC, toUTC, apidefaults.Namespace, query, limit, order, startKey)
 }
 
 // WaitForDelivery waits for resources to be released and outstanding requests to

@@ -165,7 +165,7 @@ func (r *ForwardRecorder) Write(data []byte) (int, error) {
 		Data:      dataCopy,
 		Time:      time.Now().UTC().UnixNano(),
 	}
-	if err := r.AuditLog.PostSessionSlice(SessionSlice{
+	if err := r.AuditLog.PostSessionSlice(r.Context, SessionSlice{
 		Namespace: r.Namespace,
 		SessionID: string(r.SessionID),
 		Chunks:    []*SessionChunk{chunk},
@@ -186,7 +186,7 @@ func (r *ForwardRecorder) Close() error {
 	// to release resources associated with this session.
 	// not doing so will not result in memory leak, but could result
 	// in missing playback events
-	context, cancel := context.WithTimeout(context.TODO(), defaults.ReadHeadersTimeout)
+	context, cancel := context.WithTimeout(r.Context, defaults.ReadHeadersTimeout)
 	defer cancel() // releases resources if slowOperation completes before timeout elapses
 	err = r.AuditLog.WaitForDelivery(context)
 	if err != nil {

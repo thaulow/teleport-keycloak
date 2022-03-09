@@ -413,7 +413,7 @@ func (process *TeleportProcess) GetIdentity(role types.SystemRole) (i *auth.Iden
 			if err != nil {
 				return nil, trace.Wrap(err)
 			}
-			i, err = auth.GenerateIdentity(process.localAuth, id, principals, dnsNames)
+			i, err = auth.GenerateIdentity(process.ExitContext(), process.localAuth, id, principals, dnsNames)
 			if err != nil {
 				return nil, trace.Wrap(err)
 			}
@@ -1729,7 +1729,7 @@ func (process *TeleportProcess) initSSH() error {
 
 		// make sure the namespace exists
 		namespace := types.ProcessNamespace(cfg.SSH.Namespace)
-		_, err = authClient.GetNamespace(namespace)
+		_, err = authClient.GetNamespace(process.ExitContext(), namespace)
 		if err != nil {
 			if trace.IsNotFound(err) {
 				return trace.NotFound(
@@ -1763,7 +1763,7 @@ func (process *TeleportProcess) initSSH() error {
 			return trace.Wrap(err)
 		}
 
-		clusterName, err := authClient.GetClusterName()
+		clusterName, err := authClient.GetClusterName(process.ExitContext())
 		if err != nil {
 			return trace.Wrap(err)
 		}
@@ -2035,7 +2035,7 @@ func (process *TeleportProcess) initTracing() error {
 
 	closeTracing, err := tracing.InitializeTraceProvider(process.ExitContext(), tracing.Config{
 		Service:     "teleport",
-		Directory:   process.Config.DataDir,
+		AgentAddr:   "172.16.27.131:4317",
 		Attributes:  attrs,
 		SampleRatio: 1.0,
 	})
@@ -3178,7 +3178,7 @@ func (process *TeleportProcess) initApps() {
 		// Loop over each application and create a server.
 		var applications []*types.App
 		for _, app := range process.Config.Apps.Apps {
-			publicAddr, err := getPublicAddr(accessPoint, app)
+			publicAddr, err := getPublicAddr(process.ExitContext(), accessPoint, app)
 			if err != nil {
 				return trace.Wrap(err)
 			}
@@ -3565,7 +3565,7 @@ func dumperHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // getPublicAddr waits for a proxy to be registered with Teleport.
-func getPublicAddr(authClient auth.AccessPoint, a App) (string, error) {
+func getPublicAddr(ctx context.Context, authClient auth.AccessPoint, a App) (string, error) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	timeout := time.NewTimer(5 * time.Second)
@@ -3574,7 +3574,7 @@ func getPublicAddr(authClient auth.AccessPoint, a App) (string, error) {
 	for {
 		select {
 		case <-ticker.C:
-			publicAddr, err := findPublicAddr(authClient, a)
+			publicAddr, err := findPublicAddr(ctx, authClient, a)
 			if err == nil {
 				return publicAddr, nil
 			}
@@ -3585,14 +3585,14 @@ func getPublicAddr(authClient auth.AccessPoint, a App) (string, error) {
 }
 
 // findPublicAddr tries to resolve the public address of the proxy of this cluster.
-func findPublicAddr(authClient auth.AccessPoint, a App) (string, error) {
+func findPublicAddr(ctx context.Context, authClient auth.AccessPoint, a App) (string, error) {
 	// If the application has a public address already set, use it.
 	if a.PublicAddr != "" {
 		return a.PublicAddr, nil
 	}
 
 	// Fetch list of proxies, if first has public address set, use it.
-	servers, err := authClient.GetProxies()
+	servers, err := authClient.GetProxies(ctx)
 	if err != nil {
 		return "", trace.Wrap(err)
 	}
@@ -3608,7 +3608,7 @@ func findPublicAddr(authClient auth.AccessPoint, a App) (string, error) {
 	}
 
 	// Fall back to cluster name.
-	cn, err := authClient.GetClusterName()
+	cn, err := authClient.GetClusterName(ctx)
 	if err != nil {
 		return "", trace.Wrap(err)
 	}

@@ -55,18 +55,18 @@ func NewIdentityService(backend backend.Backend) *IdentityService {
 }
 
 // DeleteAllUsers deletes all users
-func (s *IdentityService) DeleteAllUsers() error {
+func (s *IdentityService) DeleteAllUsers(ctx context.Context) error {
 	startKey := backend.Key(webPrefix, usersPrefix)
-	return s.DeleteRange(context.TODO(), startKey, backend.RangeEnd(startKey))
+	return s.DeleteRange(ctx, startKey, backend.RangeEnd(startKey))
 }
 
 // GetUsers returns a list of users registered with the local auth server
-func (s *IdentityService) GetUsers(withSecrets bool) ([]types.User, error) {
+func (s *IdentityService) GetUsers(ctx context.Context, withSecrets bool) ([]types.User, error) {
 	if withSecrets {
-		return s.getUsersWithSecrets()
+		return s.getUsersWithSecrets(ctx)
 	}
 	startKey := backend.Key(webPrefix, usersPrefix)
-	result, err := s.GetRange(context.TODO(), startKey, backend.RangeEnd(startKey), backend.NoLimit)
+	result, err := s.GetRange(ctx, startKey, backend.RangeEnd(startKey), backend.NoLimit)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -88,9 +88,9 @@ func (s *IdentityService) GetUsers(withSecrets bool) ([]types.User, error) {
 	return out, nil
 }
 
-func (s *IdentityService) getUsersWithSecrets() ([]types.User, error) {
+func (s *IdentityService) getUsersWithSecrets(ctx context.Context) ([]types.User, error) {
 	startKey := backend.Key(webPrefix, usersPrefix)
-	result, err := s.GetRange(context.TODO(), startKey, backend.RangeEnd(startKey), backend.NoLimit)
+	result, err := s.GetRange(ctx, startKey, backend.RangeEnd(startKey), backend.NoLimit)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -110,13 +110,13 @@ func (s *IdentityService) getUsersWithSecrets() ([]types.User, error) {
 }
 
 // CreateUser creates user if it does not exist.
-func (s *IdentityService) CreateUser(user types.User) error {
+func (s *IdentityService) CreateUser(ctx context.Context, user types.User) error {
 	if err := services.ValidateUser(user); err != nil {
 		return trace.Wrap(err)
 	}
 
 	// Confirm user doesn't exist before creating.
-	_, err := s.GetUser(user.GetName(), false)
+	_, err := s.GetUser(ctx, user.GetName(), false)
 	if !trace.IsNotFound(err) {
 		if err != nil {
 			return trace.Wrap(err)
@@ -135,12 +135,12 @@ func (s *IdentityService) CreateUser(user types.User) error {
 		Expires: user.Expiry(),
 	}
 
-	if _, err = s.Create(context.TODO(), item); err != nil {
+	if _, err = s.Create(ctx, item); err != nil {
 		return trace.Wrap(err)
 	}
 
 	if auth := user.GetLocalAuth(); auth != nil {
-		if err = s.upsertLocalAuthSecrets(user.GetName(), *auth); err != nil {
+		if err = s.upsertLocalAuthSecrets(ctx, user.GetName(), *auth); err != nil {
 			return trace.Wrap(err)
 		}
 	}
@@ -154,7 +154,7 @@ func (s *IdentityService) UpdateUser(ctx context.Context, user types.User) error
 	}
 
 	// Confirm user exists before updating.
-	if _, err := s.GetUser(user.GetName(), false); err != nil {
+	if _, err := s.GetUser(ctx, user.GetName(), false); err != nil {
 		return trace.Wrap(err)
 	}
 
@@ -173,7 +173,7 @@ func (s *IdentityService) UpdateUser(ctx context.Context, user types.User) error
 		return trace.Wrap(err)
 	}
 	if auth := user.GetLocalAuth(); auth != nil {
-		if err = s.upsertLocalAuthSecrets(user.GetName(), *auth); err != nil {
+		if err = s.upsertLocalAuthSecrets(ctx, user.GetName(), *auth); err != nil {
 			return trace.Wrap(err)
 		}
 	}
@@ -181,7 +181,7 @@ func (s *IdentityService) UpdateUser(ctx context.Context, user types.User) error
 }
 
 // UpsertUser updates parameters about user, or creates an entry if not exist.
-func (s *IdentityService) UpsertUser(user types.User) error {
+func (s *IdentityService) UpsertUser(ctx context.Context, user types.User) error {
 	if err := services.ValidateUser(user); err != nil {
 		return trace.Wrap(err)
 	}
@@ -195,12 +195,12 @@ func (s *IdentityService) UpsertUser(user types.User) error {
 		Expires: user.Expiry(),
 		ID:      user.GetResourceID(),
 	}
-	_, err = s.Put(context.TODO(), item)
+	_, err = s.Put(ctx, item)
 	if err != nil {
 		return trace.Wrap(err)
 	}
 	if auth := user.GetLocalAuth(); auth != nil {
-		if err = s.upsertLocalAuthSecrets(user.GetName(), *auth); err != nil {
+		if err = s.upsertLocalAuthSecrets(ctx, user.GetName(), *auth); err != nil {
 			return trace.Wrap(err)
 		}
 	}
@@ -208,14 +208,14 @@ func (s *IdentityService) UpsertUser(user types.User) error {
 }
 
 // GetUser returns a user by name
-func (s *IdentityService) GetUser(user string, withSecrets bool) (types.User, error) {
+func (s *IdentityService) GetUser(ctx context.Context, user string, withSecrets bool) (types.User, error) {
 	if withSecrets {
-		return s.getUserWithSecrets(user)
+		return s.getUserWithSecrets(ctx, user)
 	}
 	if user == "" {
 		return nil, trace.BadParameter("missing user name")
 	}
-	item, err := s.Get(context.TODO(), backend.Key(webPrefix, usersPrefix, user, paramsPrefix))
+	item, err := s.Get(ctx, backend.Key(webPrefix, usersPrefix, user, paramsPrefix))
 	if err != nil {
 		return nil, trace.NotFound("user %q is not found", user)
 	}
@@ -230,12 +230,12 @@ func (s *IdentityService) GetUser(user string, withSecrets bool) (types.User, er
 	return u, nil
 }
 
-func (s *IdentityService) getUserWithSecrets(user string) (types.User, error) {
+func (s *IdentityService) getUserWithSecrets(ctx context.Context, user string) (types.User, error) {
 	if user == "" {
 		return nil, trace.BadParameter("missing user name")
 	}
 	startKey := backend.Key(webPrefix, usersPrefix, user)
-	result, err := s.GetRange(context.TODO(), startKey, backend.RangeEnd(startKey), backend.NoLimit)
+	result, err := s.GetRange(ctx, startKey, backend.RangeEnd(startKey), backend.NoLimit)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -251,15 +251,15 @@ func (s *IdentityService) getUserWithSecrets(user string) (types.User, error) {
 	return u, nil
 }
 
-func (s *IdentityService) upsertLocalAuthSecrets(user string, auth types.LocalAuthSecrets) error {
+func (s *IdentityService) upsertLocalAuthSecrets(ctx context.Context, user string, auth types.LocalAuthSecrets) error {
 	if len(auth.PasswordHash) > 0 {
-		err := s.UpsertPasswordHash(user, auth.PasswordHash)
+		err := s.UpsertPasswordHash(ctx, user, auth.PasswordHash)
 		if err != nil {
 			return trace.Wrap(err)
 		}
 	}
 	for _, d := range auth.MFA {
-		if err := s.UpsertMFADevice(context.TODO(), user, d); err != nil {
+		if err := s.UpsertMFADevice(ctx, user, d); err != nil {
 			return trace.Wrap(err)
 		}
 	}
@@ -268,8 +268,8 @@ func (s *IdentityService) upsertLocalAuthSecrets(user string, auth types.LocalAu
 
 // GetUserByOIDCIdentity returns a user by it's specified OIDC Identity, returns first
 // user specified with this identity
-func (s *IdentityService) GetUserByOIDCIdentity(id types.ExternalIdentity) (types.User, error) {
-	users, err := s.GetUsers(false)
+func (s *IdentityService) GetUserByOIDCIdentity(ctx context.Context, id types.ExternalIdentity) (types.User, error) {
+	users, err := s.GetUsers(ctx, false)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -283,10 +283,10 @@ func (s *IdentityService) GetUserByOIDCIdentity(id types.ExternalIdentity) (type
 	return nil, trace.NotFound("user with identity %q not found", &id)
 }
 
-// GetUserBySAMLCIdentity returns a user by it's specified OIDC Identity, returns first
+// GetUserBySAMLIdentity returns a user by it's specified OIDC Identity, returns first
 // user specified with this identity
-func (s *IdentityService) GetUserBySAMLIdentity(id types.ExternalIdentity) (types.User, error) {
-	users, err := s.GetUsers(false)
+func (s *IdentityService) GetUserBySAMLIdentity(ctx context.Context, id types.ExternalIdentity) (types.User, error) {
+	users, err := s.GetUsers(ctx, false)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -301,8 +301,8 @@ func (s *IdentityService) GetUserBySAMLIdentity(id types.ExternalIdentity) (type
 }
 
 // GetUserByGithubIdentity returns the first found user with specified Github identity
-func (s *IdentityService) GetUserByGithubIdentity(id types.ExternalIdentity) (types.User, error) {
-	users, err := s.GetUsers(false)
+func (s *IdentityService) GetUserByGithubIdentity(ctx context.Context, id types.ExternalIdentity) (types.User, error) {
+	users, err := s.GetUsers(ctx, false)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -318,7 +318,7 @@ func (s *IdentityService) GetUserByGithubIdentity(id types.ExternalIdentity) (ty
 
 // DeleteUser deletes a user with all the keys from the backend
 func (s *IdentityService) DeleteUser(ctx context.Context, user string) error {
-	_, err := s.GetUser(user, false)
+	_, err := s.GetUser(ctx, user, false)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -328,12 +328,12 @@ func (s *IdentityService) DeleteUser(ctx context.Context, user string) error {
 }
 
 // UpsertPasswordHash upserts user password hash
-func (s *IdentityService) UpsertPasswordHash(username string, hash []byte) error {
+func (s *IdentityService) UpsertPasswordHash(ctx context.Context, username string, hash []byte) error {
 	userPrototype, err := types.NewUser(username)
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	err = s.CreateUser(userPrototype)
+	err = s.CreateUser(ctx, userPrototype)
 	if err != nil {
 		if !trace.IsAlreadyExists(err) {
 			return trace.Wrap(err)
@@ -343,7 +343,7 @@ func (s *IdentityService) UpsertPasswordHash(username string, hash []byte) error
 		Key:   backend.Key(webPrefix, usersPrefix, username, pwdPrefix),
 		Value: hash,
 	}
-	_, err = s.Put(context.TODO(), item)
+	_, err = s.Put(ctx, item)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -351,11 +351,11 @@ func (s *IdentityService) UpsertPasswordHash(username string, hash []byte) error
 }
 
 // GetPasswordHash returns the password hash for a given user
-func (s *IdentityService) GetPasswordHash(user string) ([]byte, error) {
+func (s *IdentityService) GetPasswordHash(ctx context.Context, user string) ([]byte, error) {
 	if user == "" {
 		return nil, trace.BadParameter("missing user name")
 	}
-	item, err := s.Get(context.TODO(), backend.Key(webPrefix, usersPrefix, user, pwdPrefix))
+	item, err := s.Get(ctx, backend.Key(webPrefix, usersPrefix, user, pwdPrefix))
 	if err != nil {
 		if trace.IsNotFound(err) {
 			return nil, trace.NotFound("user %q is not found", user)
@@ -367,7 +367,7 @@ func (s *IdentityService) GetPasswordHash(user string) ([]byte, error) {
 
 // UpsertHOTP upserts HOTP state for user
 // Deprecated: HOTP use is deprecated, use UpsertMFADevice instead.
-func (s *IdentityService) UpsertHOTP(user string, otp *hotp.HOTP) error {
+func (s *IdentityService) UpsertHOTP(ctx context.Context, user string, otp *hotp.HOTP) error {
 	if user == "" {
 		return trace.BadParameter("missing user name")
 	}
@@ -381,7 +381,7 @@ func (s *IdentityService) UpsertHOTP(user string, otp *hotp.HOTP) error {
 		Value: bytes,
 	}
 
-	_, err = s.Put(context.TODO(), item)
+	_, err = s.Put(ctx, item)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -391,12 +391,12 @@ func (s *IdentityService) UpsertHOTP(user string, otp *hotp.HOTP) error {
 
 // GetHOTP gets HOTP token state for a user
 // Deprecated: HOTP use is deprecated, use GetMFADevices instead.
-func (s *IdentityService) GetHOTP(user string) (*hotp.HOTP, error) {
+func (s *IdentityService) GetHOTP(ctx context.Context, user string) (*hotp.HOTP, error) {
 	if user == "" {
 		return nil, trace.BadParameter("missing user name")
 	}
 
-	item, err := s.Get(context.TODO(), backend.Key(webPrefix, usersPrefix, user, hotpPrefix))
+	item, err := s.Get(ctx, backend.Key(webPrefix, usersPrefix, user, hotpPrefix))
 	if err != nil {
 		if trace.IsNotFound(err) {
 			return nil, trace.NotFound("user %q is not found", user)
@@ -414,7 +414,7 @@ func (s *IdentityService) GetHOTP(user string) (*hotp.HOTP, error) {
 
 // UpsertUsedTOTPToken upserts a TOTP token to the backend so it can't be used again
 // during the 30 second window it's valid.
-func (s *IdentityService) UpsertUsedTOTPToken(user string, otpToken string) error {
+func (s *IdentityService) UpsertUsedTOTPToken(ctx context.Context, user string, otpToken string) error {
 	if user == "" {
 		return trace.BadParameter("missing user name")
 	}
@@ -423,7 +423,7 @@ func (s *IdentityService) UpsertUsedTOTPToken(user string, otpToken string) erro
 		Value:   []byte(otpToken),
 		Expires: s.Clock().Now().UTC().Add(usedTOTPTTL),
 	}
-	_, err := s.Put(context.TODO(), item)
+	_, err := s.Put(ctx, item)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -431,11 +431,11 @@ func (s *IdentityService) UpsertUsedTOTPToken(user string, otpToken string) erro
 }
 
 // GetUsedTOTPToken returns the last successfully used TOTP token. If no token is found zero is returned.
-func (s *IdentityService) GetUsedTOTPToken(user string) (string, error) {
+func (s *IdentityService) GetUsedTOTPToken(ctx context.Context, user string) (string, error) {
 	if user == "" {
 		return "", trace.BadParameter("missing user name")
 	}
-	item, err := s.Get(context.TODO(), backend.Key(webPrefix, usersPrefix, user, usedTOTPPrefix))
+	item, err := s.Get(ctx, backend.Key(webPrefix, usersPrefix, user, usedTOTPPrefix))
 	if err != nil {
 		if trace.IsNotFound(err) {
 			return "0", nil
@@ -448,15 +448,15 @@ func (s *IdentityService) GetUsedTOTPToken(user string) (string, error) {
 
 // DeleteUsedTOTPToken removes the used token from the backend. This should only
 // be used during tests.
-func (s *IdentityService) DeleteUsedTOTPToken(user string) error {
+func (s *IdentityService) DeleteUsedTOTPToken(ctx context.Context, user string) error {
 	if user == "" {
 		return trace.BadParameter("missing user name")
 	}
-	return s.Delete(context.TODO(), backend.Key(webPrefix, usersPrefix, user, usedTOTPPrefix))
+	return s.Delete(ctx, backend.Key(webPrefix, usersPrefix, user, usedTOTPPrefix))
 }
 
 // AddUserLoginAttempt logs user login attempt
-func (s *IdentityService) AddUserLoginAttempt(user string, attempt services.LoginAttempt, ttl time.Duration) error {
+func (s *IdentityService) AddUserLoginAttempt(ctx context.Context, user string, attempt services.LoginAttempt, ttl time.Duration) error {
 	if err := attempt.Check(); err != nil {
 		return trace.Wrap(err)
 	}
@@ -469,14 +469,14 @@ func (s *IdentityService) AddUserLoginAttempt(user string, attempt services.Logi
 		Value:   value,
 		Expires: backend.Expiry(s.Clock(), ttl),
 	}
-	_, err = s.Put(context.TODO(), item)
+	_, err = s.Put(ctx, item)
 	return trace.Wrap(err)
 }
 
 // GetUserLoginAttempts returns user login attempts
-func (s *IdentityService) GetUserLoginAttempts(user string) ([]services.LoginAttempt, error) {
+func (s *IdentityService) GetUserLoginAttempts(ctx context.Context, user string) ([]services.LoginAttempt, error) {
 	startKey := backend.Key(webPrefix, usersPrefix, user, attemptsPrefix)
-	result, err := s.GetRange(context.TODO(), startKey, backend.RangeEnd(startKey), backend.NoLimit)
+	result, err := s.GetRange(ctx, startKey, backend.RangeEnd(startKey), backend.NoLimit)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -494,12 +494,12 @@ func (s *IdentityService) GetUserLoginAttempts(user string) ([]services.LoginAtt
 
 // DeleteUserLoginAttempts removes all login attempts of a user. Should be
 // called after successful login.
-func (s *IdentityService) DeleteUserLoginAttempts(user string) error {
+func (s *IdentityService) DeleteUserLoginAttempts(ctx context.Context, user string) error {
 	if user == "" {
 		return trace.BadParameter("missing username")
 	}
 	startKey := backend.Key(webPrefix, usersPrefix, user, attemptsPrefix)
-	err := s.DeleteRange(context.TODO(), startKey, backend.RangeEnd(startKey))
+	err := s.DeleteRange(ctx, startKey, backend.RangeEnd(startKey))
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -507,7 +507,7 @@ func (s *IdentityService) DeleteUserLoginAttempts(user string) error {
 }
 
 // UpsertPassword upserts new password hash into a backend.
-func (s *IdentityService) UpsertPassword(user string, password []byte) error {
+func (s *IdentityService) UpsertPassword(ctx context.Context, user string, password []byte) error {
 	if user == "" {
 		return trace.BadParameter("missing username")
 	}
@@ -520,7 +520,7 @@ func (s *IdentityService) UpsertPassword(user string, password []byte) error {
 		return trace.Wrap(err)
 	}
 
-	err = s.UpsertPasswordHash(user, hash)
+	err = s.UpsertPasswordHash(ctx, user, hash)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -528,7 +528,7 @@ func (s *IdentityService) UpsertPassword(user string, password []byte) error {
 	return nil
 }
 
-func (s *IdentityService) UpsertU2FRegisterChallenge(token string, u2fChallenge *u2f.Challenge) error {
+func (s *IdentityService) UpsertU2FRegisterChallenge(ctx context.Context, token string, u2fChallenge *u2f.Challenge) error {
 	if token == "" {
 		return trace.BadParameter("missing parmeter token")
 	}
@@ -541,18 +541,18 @@ func (s *IdentityService) UpsertU2FRegisterChallenge(token string, u2fChallenge 
 		Value:   value,
 		Expires: s.Clock().Now().UTC().Add(defaults.U2FChallengeTimeout),
 	}
-	_, err = s.Put(context.TODO(), item)
+	_, err = s.Put(ctx, item)
 	if err != nil {
 		return trace.Wrap(err)
 	}
 	return nil
 }
 
-func (s *IdentityService) GetU2FRegisterChallenge(token string) (*u2f.Challenge, error) {
+func (s *IdentityService) GetU2FRegisterChallenge(ctx context.Context, token string) (*u2f.Challenge, error) {
 	if token == "" {
 		return nil, trace.BadParameter("missing parameter token")
 	}
-	item, err := s.Get(context.TODO(), backend.Key(u2fRegChalPrefix, token))
+	item, err := s.Get(ctx, backend.Key(u2fRegChalPrefix, token))
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -633,7 +633,7 @@ func (s *IdentityService) GetMFADevices(ctx context.Context, user string) ([]*ty
 	return devices, nil
 }
 
-func (s *IdentityService) UpsertU2FSignChallenge(user string, challenge *u2f.Challenge) error {
+func (s *IdentityService) UpsertU2FSignChallenge(ctx context.Context, user string, challenge *u2f.Challenge) error {
 	if user == "" {
 		return trace.BadParameter("missing parameter user")
 	}
@@ -646,18 +646,18 @@ func (s *IdentityService) UpsertU2FSignChallenge(user string, challenge *u2f.Cha
 		Value:   value,
 		Expires: s.Clock().Now().UTC().Add(defaults.U2FChallengeTimeout),
 	}
-	_, err = s.Put(context.TODO(), item)
+	_, err = s.Put(ctx, item)
 	if err != nil {
 		return trace.Wrap(err)
 	}
 	return nil
 }
 
-func (s *IdentityService) GetU2FSignChallenge(user string) (*u2f.Challenge, error) {
+func (s *IdentityService) GetU2FSignChallenge(ctx context.Context, user string) (*u2f.Challenge, error) {
 	if user == "" {
 		return nil, trace.BadParameter("missing parameter user")
 	}
-	item, err := s.Get(context.TODO(), backend.Key(webPrefix, usersPrefix, user, u2fSignChallengePrefix))
+	item, err := s.Get(ctx, backend.Key(webPrefix, usersPrefix, user, u2fSignChallengePrefix))
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -746,7 +746,7 @@ func (s *IdentityService) GetOIDCConnectors(ctx context.Context, withSecrets boo
 }
 
 // CreateOIDCAuthRequest creates new auth request
-func (s *IdentityService) CreateOIDCAuthRequest(req services.OIDCAuthRequest, ttl time.Duration) error {
+func (s *IdentityService) CreateOIDCAuthRequest(ctx context.Context, req services.OIDCAuthRequest, ttl time.Duration) error {
 	if err := req.Check(); err != nil {
 		return trace.Wrap(err)
 	}
@@ -759,7 +759,7 @@ func (s *IdentityService) CreateOIDCAuthRequest(req services.OIDCAuthRequest, tt
 		Value:   value,
 		Expires: backend.Expiry(s.Clock(), ttl),
 	}
-	_, err = s.Create(context.TODO(), item)
+	_, err = s.Create(ctx, item)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -767,11 +767,11 @@ func (s *IdentityService) CreateOIDCAuthRequest(req services.OIDCAuthRequest, tt
 }
 
 // GetOIDCAuthRequest returns OIDC auth request
-func (s *IdentityService) GetOIDCAuthRequest(stateToken string) (*services.OIDCAuthRequest, error) {
+func (s *IdentityService) GetOIDCAuthRequest(ctx context.Context, stateToken string) (*services.OIDCAuthRequest, error) {
 	if stateToken == "" {
 		return nil, trace.BadParameter("missing parameter stateToken")
 	}
-	item, err := s.Get(context.TODO(), backend.Key(webPrefix, connectorsPrefix, oidcPrefix, requestsPrefix, stateToken))
+	item, err := s.Get(ctx, backend.Key(webPrefix, connectorsPrefix, oidcPrefix, requestsPrefix, stateToken))
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -783,7 +783,7 @@ func (s *IdentityService) GetOIDCAuthRequest(stateToken string) (*services.OIDCA
 }
 
 // CreateSAMLConnector creates SAML Connector
-func (s *IdentityService) CreateSAMLConnector(connector types.SAMLConnector) error {
+func (s *IdentityService) CreateSAMLConnector(ctx context.Context, connector types.SAMLConnector) error {
 	if err := services.ValidateSAMLConnector(connector); err != nil {
 		return trace.Wrap(err)
 	}
@@ -796,7 +796,7 @@ func (s *IdentityService) CreateSAMLConnector(connector types.SAMLConnector) err
 		Value:   value,
 		Expires: connector.Expiry(),
 	}
-	_, err = s.Create(context.TODO(), item)
+	_, err = s.Create(ctx, item)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -889,7 +889,7 @@ func (s *IdentityService) GetSAMLConnectors(ctx context.Context, withSecrets boo
 }
 
 // CreateSAMLAuthRequest creates new auth request
-func (s *IdentityService) CreateSAMLAuthRequest(req services.SAMLAuthRequest, ttl time.Duration) error {
+func (s *IdentityService) CreateSAMLAuthRequest(ctx context.Context, req services.SAMLAuthRequest, ttl time.Duration) error {
 	if err := req.Check(); err != nil {
 		return trace.Wrap(err)
 	}
@@ -902,7 +902,7 @@ func (s *IdentityService) CreateSAMLAuthRequest(req services.SAMLAuthRequest, tt
 		Value:   value,
 		Expires: backend.Expiry(s.Clock(), ttl),
 	}
-	_, err = s.Create(context.TODO(), item)
+	_, err = s.Create(ctx, item)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -910,11 +910,11 @@ func (s *IdentityService) CreateSAMLAuthRequest(req services.SAMLAuthRequest, tt
 }
 
 // GetSAMLAuthRequest returns SAML auth request if found
-func (s *IdentityService) GetSAMLAuthRequest(id string) (*services.SAMLAuthRequest, error) {
+func (s *IdentityService) GetSAMLAuthRequest(ctx context.Context, id string) (*services.SAMLAuthRequest, error) {
 	if id == "" {
 		return nil, trace.BadParameter("missing parameter id")
 	}
-	item, err := s.Get(context.TODO(), backend.Key(webPrefix, connectorsPrefix, samlPrefix, requestsPrefix, id))
+	item, err := s.Get(ctx, backend.Key(webPrefix, connectorsPrefix, samlPrefix, requestsPrefix, id))
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -926,7 +926,7 @@ func (s *IdentityService) GetSAMLAuthRequest(id string) (*services.SAMLAuthReque
 }
 
 // CreateGithubConnector creates a new Github connector
-func (s *IdentityService) CreateGithubConnector(connector types.GithubConnector) error {
+func (s *IdentityService) CreateGithubConnector(ctx context.Context, connector types.GithubConnector) error {
 	if err := connector.CheckAndSetDefaults(); err != nil {
 		return trace.Wrap(err)
 	}
@@ -939,7 +939,7 @@ func (s *IdentityService) CreateGithubConnector(connector types.GithubConnector)
 		Value:   value,
 		Expires: connector.Expiry(),
 	}
-	_, err = s.Create(context.TODO(), item)
+	_, err = s.Create(ctx, item)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -989,7 +989,7 @@ func (s *IdentityService) GetGithubConnectors(ctx context.Context, withSecrets b
 	return connectors, nil
 }
 
-// GetGithubConnectot returns a particular Github connector
+// GetGithubConnector returns a particular Github connector
 func (s *IdentityService) GetGithubConnector(ctx context.Context, name string, withSecrets bool) (types.GithubConnector, error) {
 	if name == "" {
 		return nil, trace.BadParameter("missing parameter name")
@@ -1020,7 +1020,7 @@ func (s *IdentityService) DeleteGithubConnector(ctx context.Context, name string
 }
 
 // CreateGithubAuthRequest creates a new auth request for Github OAuth2 flow
-func (s *IdentityService) CreateGithubAuthRequest(req services.GithubAuthRequest) error {
+func (s *IdentityService) CreateGithubAuthRequest(ctx context.Context, req services.GithubAuthRequest) error {
 	err := req.Check()
 	if err != nil {
 		return trace.Wrap(err)
@@ -1034,7 +1034,7 @@ func (s *IdentityService) CreateGithubAuthRequest(req services.GithubAuthRequest
 		Value:   value,
 		Expires: req.Expiry(),
 	}
-	_, err = s.Create(context.TODO(), item)
+	_, err = s.Create(ctx, item)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -1042,11 +1042,11 @@ func (s *IdentityService) CreateGithubAuthRequest(req services.GithubAuthRequest
 }
 
 // GetGithubAuthRequest retrieves Github auth request by the token
-func (s *IdentityService) GetGithubAuthRequest(stateToken string) (*services.GithubAuthRequest, error) {
+func (s *IdentityService) GetGithubAuthRequest(ctx context.Context, stateToken string) (*services.GithubAuthRequest, error) {
 	if stateToken == "" {
 		return nil, trace.BadParameter("missing parameter stateToken")
 	}
-	item, err := s.Get(context.TODO(), backend.Key(webPrefix, connectorsPrefix, githubPrefix, requestsPrefix, stateToken))
+	item, err := s.Get(ctx, backend.Key(webPrefix, connectorsPrefix, githubPrefix, requestsPrefix, stateToken))
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

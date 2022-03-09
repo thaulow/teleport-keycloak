@@ -26,7 +26,7 @@ import (
 // ProxyGetter is a service that gets proxies.
 type ProxyGetter interface {
 	// GetProxies returns a list of registered proxies.
-	GetProxies() ([]types.Server, error)
+	GetProxies(ctx context.Context) ([]types.Server, error)
 }
 
 // Presence records and reports the presence of all components
@@ -36,10 +36,10 @@ type Presence interface {
 	types.Semaphores
 
 	// UpsertLocalClusterName upserts local domain
-	UpsertLocalClusterName(name string) error
+	UpsertLocalClusterName(ctx context.Context, name string) error
 
 	// GetLocalClusterName upserts local domain
-	GetLocalClusterName() (string, error)
+	GetLocalClusterName(ctx context.Context) (string, error)
 
 	// GetNode returns a node by name and namespace.
 	GetNode(ctx context.Context, namespace, name string) (types.Server, error)
@@ -61,7 +61,7 @@ type Presence interface {
 	UpsertNode(ctx context.Context, server types.Server) (*types.KeepAlive, error)
 
 	// UpsertNodes bulk inserts nodes.
-	UpsertNodes(namespace string, servers []types.Server) error
+	UpsertNodes(ctx context.Context, namespace string, servers []types.Server) error
 
 	// DELETE IN: 5.1.0
 	//
@@ -71,60 +71,60 @@ type Presence interface {
 	KeepAliveNode(ctx context.Context, h types.KeepAlive) error
 
 	// GetAuthServers returns a list of registered servers
-	GetAuthServers() ([]types.Server, error)
+	GetAuthServers(ctx context.Context) ([]types.Server, error)
 
 	// UpsertAuthServer registers auth server presence, permanently if ttl is 0 or
 	// for the specified duration with second resolution if it's >= 1 second
-	UpsertAuthServer(server types.Server) error
+	UpsertAuthServer(ctx context.Context, server types.Server) error
 
 	// DeleteAuthServer deletes auth server by name
-	DeleteAuthServer(name string) error
+	DeleteAuthServer(ctx context.Context, name string) error
 
 	// DeleteAllAuthServers deletes all auth servers
-	DeleteAllAuthServers() error
+	DeleteAllAuthServers(ctx context.Context) error
 
 	// UpsertProxy registers proxy server presence, permanently if ttl is 0 or
 	// for the specified duration with second resolution if it's >= 1 second
-	UpsertProxy(server types.Server) error
+	UpsertProxy(ctx context.Context, server types.Server) error
 
 	// ProxyGetter gets a list of proxies
 	ProxyGetter
 
 	// DeleteProxy deletes proxy by name
-	DeleteProxy(name string) error
+	DeleteProxy(ctx context.Context, name string) error
 
 	// DeleteAllProxies deletes all proxies
-	DeleteAllProxies() error
+	DeleteAllProxies(ctx context.Context) error
 
 	// UpsertReverseTunnel upserts reverse tunnel entry temporarily or permanently
-	UpsertReverseTunnel(tunnel types.ReverseTunnel) error
+	UpsertReverseTunnel(ctx context.Context, tunnel types.ReverseTunnel) error
 
 	// GetReverseTunnel returns reverse tunnel by name
-	GetReverseTunnel(name string, opts ...MarshalOption) (types.ReverseTunnel, error)
+	GetReverseTunnel(ctx context.Context, name string, opts ...MarshalOption) (types.ReverseTunnel, error)
 
 	// GetReverseTunnels returns a list of registered servers
-	GetReverseTunnels(opts ...MarshalOption) ([]types.ReverseTunnel, error)
+	GetReverseTunnels(ctx context.Context, opts ...MarshalOption) ([]types.ReverseTunnel, error)
 
 	// DeleteReverseTunnel deletes reverse tunnel by it's domain name
-	DeleteReverseTunnel(domainName string) error
+	DeleteReverseTunnel(ctx context.Context, domainName string) error
 
 	// DeleteAllReverseTunnels deletes all reverse tunnels
-	DeleteAllReverseTunnels() error
+	DeleteAllReverseTunnels(ctx context.Context) error
 
 	// GetNamespaces returns a list of namespaces
-	GetNamespaces() ([]types.Namespace, error)
+	GetNamespaces(ctx context.Context) ([]types.Namespace, error)
 
 	// GetNamespace returns namespace by name
-	GetNamespace(name string) (*types.Namespace, error)
+	GetNamespace(ctx context.Context, name string) (*types.Namespace, error)
 
 	// DeleteAllNamespaces deletes all namespaces
-	DeleteAllNamespaces() error
+	DeleteAllNamespaces(ctx context.Context) error
 
 	// UpsertNamespace upserts namespace
-	UpsertNamespace(types.Namespace) error
+	UpsertNamespace(context.Context, types.Namespace) error
 
 	// DeleteNamespace deletes namespace by name
-	DeleteNamespace(name string) error
+	DeleteNamespace(ctx context.Context, name string) error
 
 	// UpsertTrustedCluster creates or updates a TrustedCluster in the backend.
 	UpsertTrustedCluster(ctx context.Context, tc types.TrustedCluster) (types.TrustedCluster, error)
@@ -139,40 +139,40 @@ type Presence interface {
 	DeleteTrustedCluster(ctx context.Context, name string) error
 
 	// UpsertTunnelConnection upserts tunnel connection
-	UpsertTunnelConnection(types.TunnelConnection) error
+	UpsertTunnelConnection(context.Context, types.TunnelConnection) error
 
 	// GetTunnelConnections returns tunnel connections for a given cluster
-	GetTunnelConnections(clusterName string, opts ...MarshalOption) ([]types.TunnelConnection, error)
+	GetTunnelConnections(ctx context.Context, clusterName string, opts ...MarshalOption) ([]types.TunnelConnection, error)
 
 	// GetAllTunnelConnections returns all tunnel connections
-	GetAllTunnelConnections(opts ...MarshalOption) ([]types.TunnelConnection, error)
+	GetAllTunnelConnections(ctx context.Context, opts ...MarshalOption) ([]types.TunnelConnection, error)
 
 	// DeleteTunnelConnection deletes tunnel connection by name
-	DeleteTunnelConnection(clusterName string, connName string) error
+	DeleteTunnelConnection(ctx context.Context, clusterName string, connName string) error
 
 	// DeleteTunnelConnections deletes all tunnel connections for cluster
-	DeleteTunnelConnections(clusterName string) error
+	DeleteTunnelConnections(ctx context.Context, clusterName string) error
 
 	// DeleteAllTunnelConnections deletes all tunnel connections for cluster
-	DeleteAllTunnelConnections() error
+	DeleteAllTunnelConnections(ctx context.Context) error
 
 	// CreateRemoteCluster creates a remote cluster
-	CreateRemoteCluster(types.RemoteCluster) error
+	CreateRemoteCluster(context.Context, types.RemoteCluster) error
 
 	// UpdateRemoteCluster updates a remote cluster
 	UpdateRemoteCluster(ctx context.Context, rc types.RemoteCluster) error
 
 	// GetRemoteClusters returns a list of remote clusters
-	GetRemoteClusters(opts ...MarshalOption) ([]types.RemoteCluster, error)
+	GetRemoteClusters(ctx context.Context, opts ...MarshalOption) ([]types.RemoteCluster, error)
 
 	// GetRemoteCluster returns a remote cluster by name
-	GetRemoteCluster(clusterName string) (types.RemoteCluster, error)
+	GetRemoteCluster(ctx context.Context, clusterName string) (types.RemoteCluster, error)
 
 	// DeleteRemoteCluster deletes remote cluster by name
-	DeleteRemoteCluster(clusterName string) error
+	DeleteRemoteCluster(ctx context.Context, clusterName string) error
 
 	// DeleteAllRemoteClusters deletes all remote clusters
-	DeleteAllRemoteClusters() error
+	DeleteAllRemoteClusters(ctx context.Context) error
 
 	// UpsertKubeService registers kubernetes service presence.
 	UpsertKubeService(context.Context, types.Server) error

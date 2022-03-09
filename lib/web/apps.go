@@ -48,7 +48,7 @@ func (h *Handler) clusterAppsGet(w http.ResponseWriter, r *http.Request, p httpr
 	}
 
 	// Get a list of application servers.
-	clt, err := ctx.GetUserClient(site)
+	clt, err := ctx.GetUserClient(r.Context(), site)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -292,7 +292,7 @@ func (h *Handler) resolveApp(ctx context.Context, clt app.Getter, proxy reverset
 // resolveDirect takes a public address and cluster name and exactly resolves
 // the application and the server on which it is running.
 func (h *Handler) resolveDirect(ctx context.Context, proxy reversetunnel.Tunnel, publicAddr string, clusterName string) (*types.App, types.Server, string, error) {
-	clusterClient, err := proxy.GetSite(clusterName)
+	clusterClient, err := proxy.GetSite(ctx, clusterName)
 	if err != nil {
 		return nil, nil, "", trace.Wrap(err)
 	}

@@ -101,7 +101,7 @@ func New(ctx context.Context, opts ...KeygenOption) *Keygen {
 	if k.precomputeCount > 0 {
 		log.Debugf("SSH cert authority is going to pre-compute %v keys.", k.precomputeCount)
 		k.keysCh = make(chan keyPair, k.precomputeCount)
-		go k.precomputeKeys()
+		go k.precomputeKeys(ctx)
 	} else {
 		log.Debugf("SSH cert authority started with no keys pre-compute.")
 	}
@@ -115,19 +115,19 @@ func (k *Keygen) Close() {
 }
 
 // GetNewKeyPairFromPool returns precomputed key pair from the pool.
-func (k *Keygen) GetNewKeyPairFromPool() ([]byte, []byte, error) {
+func (k *Keygen) GetNewKeyPairFromPool(ctx context.Context) ([]byte, []byte, error) {
 	select {
 	case key := <-k.keysCh:
 		return key.privPem, key.pubBytes, nil
 	default:
-		return GenerateKeyPair("")
+		return GenerateKeyPair(ctx, "")
 	}
 }
 
 // precomputeKeys continues loops forever trying to compute cache key pairs.
-func (k *Keygen) precomputeKeys() {
+func (k *Keygen) precomputeKeys(ctx context.Context) {
 	for {
-		privPem, pubBytes, err := GenerateKeyPair("")
+		privPem, pubBytes, err := GenerateKeyPair(ctx, "")
 		if err != nil {
 			log.Errorf("Unable to generate key pair: %v.", err)
 			continue
@@ -149,7 +149,7 @@ func (k *Keygen) precomputeKeys() {
 
 // GenerateKeyPair returns fresh priv/pub keypair, takes about 300ms to
 // execute.
-func GenerateKeyPair(passphrase string) ([]byte, []byte, error) {
+func GenerateKeyPair(ctx context.Context, passphrase string) ([]byte, []byte, error) {
 	priv, err := rsa.GenerateKey(rand.Reader, constants.RSAKeySize)
 	if err != nil {
 		return nil, nil, err
@@ -172,13 +172,13 @@ func GenerateKeyPair(passphrase string) ([]byte, []byte, error) {
 
 // GenerateKeyPair returns fresh priv/pub keypair, takes about 300ms to
 // execute.
-func (k *Keygen) GenerateKeyPair(passphrase string) ([]byte, []byte, error) {
-	return GenerateKeyPair(passphrase)
+func (k *Keygen) GenerateKeyPair(ctx context.Context, passphrase string) ([]byte, []byte, error) {
+	return GenerateKeyPair(ctx, passphrase)
 }
 
 // GenerateHostCert generates a host certificate with the passed in parameters.
 // The private key of the CA to sign the certificate must be provided.
-func (k *Keygen) GenerateHostCert(c services.HostCertParams) ([]byte, error) {
+func (k *Keygen) GenerateHostCert(ctx context.Context, c services.HostCertParams) ([]byte, error) {
 	if err := c.Check(); err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -235,7 +235,7 @@ func (k *Keygen) GenerateHostCertWithoutValidation(c services.HostCertParams) ([
 
 // GenerateUserCert generates a user certificate with the passed in parameters.
 // The private key of the CA to sign the certificate must be provided.
-func (k *Keygen) GenerateUserCert(c services.UserCertParams) ([]byte, error) {
+func (k *Keygen) GenerateUserCert(ctx context.Context, c services.UserCertParams) ([]byte, error) {
 	if err := c.CheckAndSetDefaults(); err != nil {
 		return nil, trace.Wrap(err, "error validating UserCertParams")
 	}

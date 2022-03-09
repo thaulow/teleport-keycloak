@@ -158,7 +158,7 @@ func (l *FileLog) EmitAuditEvent(ctx context.Context, event apievents.AuditEvent
 }
 
 // EmitAuditEventLegacy adds a new event to the log. Part of auth.IFileLog interface.
-func (l *FileLog) EmitAuditEventLegacy(event Event, fields EventFields) error {
+func (l *FileLog) EmitAuditEventLegacy(ctx context.Context, event Event, fields EventFields) error {
 	l.rw.RLock()
 	defer l.rw.RUnlock()
 
@@ -206,7 +206,7 @@ func (l *FileLog) EmitAuditEventLegacy(event Event, fields EventFields) error {
 // The only mandatory requirement is a date range (UTC).
 //
 // This function may never return more than 1 MiB of event data.
-func (l *FileLog) SearchEvents(fromUTC, toUTC time.Time, namespace string, eventTypes []string, limit int, order types.EventOrder, startAfter string) ([]apievents.AuditEvent, string, error) {
+func (l *FileLog) SearchEvents(ctx context.Context, fromUTC, toUTC time.Time, namespace string, eventTypes []string, limit int, order types.EventOrder, startAfter string) ([]apievents.AuditEvent, string, error) {
 	l.Debugf("SearchEvents(%v, %v, namespace=%v, eventType=%v, limit=%v)", fromUTC, toUTC, namespace, eventTypes, limit)
 	if limit <= 0 {
 		limit = defaults.EventsIterationLimit
@@ -353,7 +353,7 @@ func getCheckpointFromEvent(event apievents.AuditEvent) (string, error) {
 	return event.GetID(), nil
 }
 
-func (l *FileLog) SearchSessionEvents(fromUTC, toUTC time.Time, limit int, order types.EventOrder, startKey string) ([]apievents.AuditEvent, string, error) {
+func (l *FileLog) SearchSessionEvents(ctx context.Context, fromUTC, toUTC time.Time, limit int, order types.EventOrder, startKey string) ([]apievents.AuditEvent, string, error) {
 	l.Debugf("SearchSessionEvents(%v, %v, %v, %v)", fromUTC, toUTC, order, limit)
 
 	// only search for specific event types
@@ -363,7 +363,7 @@ func (l *FileLog) SearchSessionEvents(fromUTC, toUTC time.Time, limit int, order
 	// logs, some events can be fetched with session end event and without
 	// session start event. to fix this, the code below filters out the events without
 	// start event to guarantee that all events in the range will get fetched
-	events, lastKey, err := l.SearchEvents(fromUTC, toUTC, "default", eventTypes, limit, order, startKey)
+	events, lastKey, err := l.SearchEvents(ctx, fromUTC, toUTC, "default", eventTypes, limit, order, startKey)
 	if err != nil {
 		return nil, lastKey, trace.Wrap(err)
 	}
@@ -411,11 +411,11 @@ func (l *FileLog) WaitForDelivery(context.Context) error {
 	return nil
 }
 
-func (l *FileLog) UploadSessionRecording(SessionRecording) error {
+func (l *FileLog) UploadSessionRecording(context.Context, SessionRecording) error {
 	return trace.NotImplemented("not implemented")
 }
 
-func (l *FileLog) PostSessionSlice(slice SessionSlice) error {
+func (l *FileLog) PostSessionSlice(ctx context.Context, slice SessionSlice) error {
 	if slice.Namespace == "" {
 		return trace.BadParameter("missing parameter Namespace")
 	}
@@ -428,10 +428,10 @@ func (l *FileLog) PostSessionSlice(slice SessionSlice) error {
 	// V3 API does not write session log to local session directory,
 	// instead it writes locally, this internal method captures
 	// non-print events to the global audit log
-	return l.processSlice(nil, &slice)
+	return l.processSlice(ctx, nil, &slice)
 }
 
-func (l *FileLog) processSlice(sl SessionLogger, slice *SessionSlice) error {
+func (l *FileLog) processSlice(ctx context.Context, sl SessionLogger, slice *SessionSlice) error {
 	for _, chunk := range slice.Chunks {
 		if chunk.EventType == SessionPrintEvent || chunk.EventType == "" {
 			continue
@@ -440,18 +440,18 @@ func (l *FileLog) processSlice(sl SessionLogger, slice *SessionSlice) error {
 		if err != nil {
 			return trace.Wrap(err)
 		}
-		if err := l.EmitAuditEventLegacy(Event{Name: chunk.EventType}, fields); err != nil {
+		if err := l.EmitAuditEventLegacy(ctx, Event{Name: chunk.EventType}, fields); err != nil {
 			return trace.Wrap(err)
 		}
 	}
 	return nil
 }
 
-func (l *FileLog) GetSessionChunk(namespace string, sid session.ID, offsetBytes, maxBytes int) ([]byte, error) {
+func (l *FileLog) GetSessionChunk(ctx context.Context, namespace string, sid session.ID, offsetBytes, maxBytes int) ([]byte, error) {
 	return nil, trace.NotImplemented("not implemented")
 }
 
-func (l *FileLog) GetSessionEvents(namespace string, sid session.ID, after int, fetchPrintEvents bool) ([]EventFields, error) {
+func (l *FileLog) GetSessionEvents(ctx context.Context, namespace string, sid session.ID, after int, fetchPrintEvents bool) ([]EventFields, error) {
 	return nil, trace.NotImplemented("not implemented")
 }
 

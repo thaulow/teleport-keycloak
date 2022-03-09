@@ -204,7 +204,7 @@ func connectToAuthService(ctx context.Context, cfg *service.Config, clientConfig
 	}
 
 	// Check connectivity by calling something on the client.
-	_, err = client.GetClusterName()
+	_, err = client.GetClusterName(ctx)
 	if err != nil {
 		err = trace.Wrap(err, "failed direct dial to auth server: %v", err)
 		if clientConfig.SSH == nil {
@@ -245,7 +245,7 @@ func connectToAuthService(ctx context.Context, cfg *service.Config, clientConfig
 			return nil, trace.NewAggregate(errs...)
 		}
 		// Check connectivity by calling something on the client.
-		if _, err := client.GetClusterName(); err != nil {
+		if _, err := client.GetClusterName(ctx); err != nil {
 			errs = append(errs, trace.Wrap(err, "failed dial to auth server through reverse tunnel: %v", err))
 			return nil, trace.NewAggregate(errs...)
 		}

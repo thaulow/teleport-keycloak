@@ -17,6 +17,7 @@ limitations under the License.
 package reversetunnel
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"sync"
@@ -154,9 +155,9 @@ func (s *localSite) GetLastConnected() time.Time {
 	return s.clock.Now()
 }
 
-func (s *localSite) DialAuthServer() (conn net.Conn, err error) {
+func (s *localSite) DialAuthServer(ctx context.Context) (conn net.Conn, err error) {
 	// get list of local auth servers
-	authServers, err := s.client.GetAuthServers()
+	authServers, err := s.client.GetAuthServers(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -186,7 +187,7 @@ func (s *localSite) Dial(params DialParams) (net.Conn, error) {
 	// If the proxy is in recording mode and a SSH connection is being requested,
 	// use the agent to dial and build an in-memory forwarding server.
 	if params.ConnType == types.NodeTunnel && services.IsRecordAtProxy(recConfig.GetMode()) {
-		return s.dialWithAgent(params)
+		return s.dialWithAgent(s.srv.Context, params)
 	}
 
 	// Attempt to perform a direct TCP dial.
@@ -209,7 +210,7 @@ func (s *localSite) DialTCP(params DialParams) (net.Conn, error) {
 // IsClosed always returns false because localSite is never closed.
 func (s *localSite) IsClosed() bool { return false }
 
-func (s *localSite) dialWithAgent(params DialParams) (net.Conn, error) {
+func (s *localSite) dialWithAgent(ctx context.Context, params DialParams) (net.Conn, error) {
 	if params.GetUserAgent == nil {
 		return nil, trace.BadParameter("user agent getter missing")
 	}
@@ -230,7 +231,7 @@ func (s *localSite) dialWithAgent(params DialParams) (net.Conn, error) {
 	}
 
 	// Get a host certificate for the forwarding node from the cache.
-	hostCertificate, err := s.certificateCache.getHostCertificate(params.Address, params.Principals)
+	hostCertificate, err := s.certificateCache.getHostCertificate(ctx, params.Address, params.Principals)
 	if err != nil {
 		userAgent.Close()
 		return nil, trace.Wrap(err)

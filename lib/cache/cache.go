@@ -1099,7 +1099,7 @@ var _ map[getCertAuthorityCacheKey]struct{} // compile-time hashability check
 
 // GetCertAuthority returns certificate authority by given id. Parameter loadSigningKeys
 // controls if signing keys are loaded
-func (c *Cache) GetCertAuthority(id types.CertAuthID, loadSigningKeys bool, opts ...services.MarshalOption) (types.CertAuthority, error) {
+func (c *Cache) GetCertAuthority(ctx context.Context, id types.CertAuthID, loadSigningKeys bool, opts ...services.MarshalOption) (types.CertAuthority, error) {
 	rg, err := c.read()
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -1108,8 +1108,8 @@ func (c *Cache) GetCertAuthority(id types.CertAuthID, loadSigningKeys bool, opts
 
 	if !rg.IsCacheRead() && !loadSigningKeys {
 		ta := func(_ types.CertAuthority) {} // compile-time type assertion
-		ci, err := c.fnCache.Get(context.TODO(), getCertAuthorityCacheKey{id}, func() (interface{}, error) {
-			ca, err := rg.trust.GetCertAuthority(id, loadSigningKeys, opts...)
+		ci, err := c.fnCache.Get(ctx, getCertAuthorityCacheKey{id}, func() (interface{}, error) {
+			ca, err := rg.trust.GetCertAuthority(c.ctx, id, loadSigningKeys, opts...)
 			ta(ca)
 			return ca, err
 		})
@@ -1121,13 +1121,13 @@ func (c *Cache) GetCertAuthority(id types.CertAuthID, loadSigningKeys bool, opts
 		return cachedCA.Clone(), nil
 	}
 
-	ca, err := rg.trust.GetCertAuthority(id, loadSigningKeys, opts...)
+	ca, err := rg.trust.GetCertAuthority(ctx, id, loadSigningKeys, opts...)
 	if trace.IsNotFound(err) && rg.IsCacheRead() {
 		// release read lock early
 		rg.Release()
 		// fallback is sane because method is never used
 		// in construction of derivative caches.
-		if ca, err := c.Config.Trust.GetCertAuthority(id, loadSigningKeys, opts...); err == nil {
+		if ca, err := c.Config.Trust.GetCertAuthority(ctx, id, loadSigningKeys, opts...); err == nil {
 			return ca, nil
 		}
 	}
@@ -1142,7 +1142,7 @@ var _ map[getCertAuthoritiesCacheKey]struct{} // compile-time hashability check
 
 // GetCertAuthorities returns a list of authorities of a given type
 // loadSigningKeys controls whether signing keys should be loaded or not
-func (c *Cache) GetCertAuthorities(caType types.CertAuthType, loadSigningKeys bool, opts ...services.MarshalOption) ([]types.CertAuthority, error) {
+func (c *Cache) GetCertAuthorities(ctx context.Context, caType types.CertAuthType, loadSigningKeys bool, opts ...services.MarshalOption) ([]types.CertAuthority, error) {
 	rg, err := c.read()
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -1150,8 +1150,8 @@ func (c *Cache) GetCertAuthorities(caType types.CertAuthType, loadSigningKeys bo
 	defer rg.Release()
 	if !rg.IsCacheRead() && !loadSigningKeys {
 		ta := func(_ []types.CertAuthority) {} // compile-time type assertion
-		ci, err := c.fnCache.Get(context.TODO(), getCertAuthoritiesCacheKey{caType}, func() (interface{}, error) {
-			cas, err := rg.trust.GetCertAuthorities(caType, loadSigningKeys, opts...)
+		ci, err := c.fnCache.Get(ctx, getCertAuthoritiesCacheKey{caType}, func() (interface{}, error) {
+			cas, err := rg.trust.GetCertAuthorities(c.ctx, caType, loadSigningKeys, opts...)
 			ta(cas)
 			return cas, trace.Wrap(err)
 		})
@@ -1166,17 +1166,17 @@ func (c *Cache) GetCertAuthorities(caType types.CertAuthType, loadSigningKeys bo
 		}
 		return cas, nil
 	}
-	return rg.trust.GetCertAuthorities(caType, loadSigningKeys, opts...)
+	return rg.trust.GetCertAuthorities(ctx, caType, loadSigningKeys, opts...)
 }
 
 // GetStaticTokens gets the list of static tokens used to provision nodes.
-func (c *Cache) GetStaticTokens() (types.StaticTokens, error) {
+func (c *Cache) GetStaticTokens(ctx context.Context) (types.StaticTokens, error) {
 	rg, err := c.read()
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 	defer rg.Release()
-	return rg.clusterConfig.GetStaticTokens()
+	return rg.clusterConfig.GetStaticTokens(ctx)
 }
 
 // GetTokens returns all active (non-expired) provisioning tokens
@@ -1217,7 +1217,7 @@ type clusterConfigCacheKey struct {
 var _ map[clusterConfigCacheKey]struct{} // compile-time hashability check
 
 // GetClusterConfig gets services.ClusterConfig from the backend.
-func (c *Cache) GetClusterConfig(opts ...services.MarshalOption) (types.ClusterConfig, error) {
+func (c *Cache) GetClusterConfig(ctx context.Context, opts ...services.MarshalOption) (types.ClusterConfig, error) {
 	rg, err := c.read()
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -1225,8 +1225,8 @@ func (c *Cache) GetClusterConfig(opts ...services.MarshalOption) (types.ClusterC
 	defer rg.Release()
 	if !rg.IsCacheRead() {
 		ta := func(_ types.ClusterConfig) {} // compile-time type assertion
-		ci, err := c.fnCache.Get(context.TODO(), clusterConfigCacheKey{"main"}, func() (interface{}, error) {
-			cfg, err := rg.clusterConfig.GetClusterConfig(opts...)
+		ci, err := c.fnCache.Get(ctx, clusterConfigCacheKey{"main"}, func() (interface{}, error) {
+			cfg, err := rg.clusterConfig.GetClusterConfig(c.ctx, opts...)
 			ta(cfg)
 			return cfg, err
 		})
@@ -1237,7 +1237,7 @@ func (c *Cache) GetClusterConfig(opts ...services.MarshalOption) (types.ClusterC
 		ta(cachedCfg)
 		return cachedCfg.Copy(), nil
 	}
-	return rg.clusterConfig.GetClusterConfig(opts...)
+	return rg.clusterConfig.GetClusterConfig(ctx, opts...)
 }
 
 // GetClusterAuditConfig gets ClusterAuditConfig from the backend.
@@ -1293,7 +1293,7 @@ func (c *Cache) GetClusterNetworkingConfig(ctx context.Context, opts ...services
 }
 
 // GetClusterName gets the name of the cluster from the backend.
-func (c *Cache) GetClusterName(opts ...services.MarshalOption) (types.ClusterName, error) {
+func (c *Cache) GetClusterName(ctx context.Context, opts ...services.MarshalOption) (types.ClusterName, error) {
 	rg, err := c.read()
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -1301,8 +1301,8 @@ func (c *Cache) GetClusterName(opts ...services.MarshalOption) (types.ClusterNam
 	defer rg.Release()
 	if !rg.IsCacheRead() {
 		ta := func(_ types.ClusterName) {} // compile-time type assertion
-		ci, err := c.fnCache.Get(context.TODO(), clusterConfigCacheKey{"name"}, func() (interface{}, error) {
-			cfg, err := rg.clusterConfig.GetClusterName(opts...)
+		ci, err := c.fnCache.Get(ctx, clusterConfigCacheKey{"name"}, func() (interface{}, error) {
+			cfg, err := rg.clusterConfig.GetClusterName(c.ctx, opts...)
 			ta(cfg)
 			return cfg, err
 		})
@@ -1313,7 +1313,7 @@ func (c *Cache) GetClusterName(opts ...services.MarshalOption) (types.ClusterNam
 		ta(cachedCfg)
 		return cachedCfg.Clone(), nil
 	}
-	return rg.clusterConfig.GetClusterName(opts...)
+	return rg.clusterConfig.GetClusterName(ctx, opts...)
 }
 
 // GetRoles is a part of auth.AccessPoint implementation
@@ -1347,23 +1347,23 @@ func (c *Cache) GetRole(ctx context.Context, name string) (types.Role, error) {
 }
 
 // GetNamespace returns namespace
-func (c *Cache) GetNamespace(name string) (*types.Namespace, error) {
+func (c *Cache) GetNamespace(ctx context.Context, name string) (*types.Namespace, error) {
 	rg, err := c.read()
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 	defer rg.Release()
-	return rg.presence.GetNamespace(name)
+	return rg.presence.GetNamespace(ctx, name)
 }
 
 // GetNamespaces is a part of auth.AccessPoint implementation
-func (c *Cache) GetNamespaces() ([]types.Namespace, error) {
+func (c *Cache) GetNamespaces(ctx context.Context) ([]types.Namespace, error) {
 	rg, err := c.read()
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 	defer rg.Release()
-	return rg.presence.GetNamespaces()
+	return rg.presence.GetNamespaces(ctx)
 }
 
 // GetNode finds and returns a node by name and namespace.
@@ -1487,33 +1487,33 @@ func (c *Cache) ListNodes(ctx context.Context, req proto.ListNodesRequest) ([]ty
 }
 
 // GetAuthServers returns a list of registered servers
-func (c *Cache) GetAuthServers() ([]types.Server, error) {
+func (c *Cache) GetAuthServers(ctx context.Context) ([]types.Server, error) {
 	rg, err := c.read()
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 	defer rg.Release()
-	return rg.presence.GetAuthServers()
+	return rg.presence.GetAuthServers(ctx)
 }
 
 // GetReverseTunnels is a part of auth.AccessPoint implementation
-func (c *Cache) GetReverseTunnels(opts ...services.MarshalOption) ([]types.ReverseTunnel, error) {
+func (c *Cache) GetReverseTunnels(ctx context.Context, opts ...services.MarshalOption) ([]types.ReverseTunnel, error) {
 	rg, err := c.read()
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 	defer rg.Release()
-	return rg.presence.GetReverseTunnels(opts...)
+	return rg.presence.GetReverseTunnels(ctx, opts...)
 }
 
 // GetProxies is a part of auth.AccessPoint implementation
-func (c *Cache) GetProxies() ([]types.Server, error) {
+func (c *Cache) GetProxies(ctx context.Context) ([]types.Server, error) {
 	rg, err := c.read()
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 	defer rg.Release()
-	return rg.presence.GetProxies()
+	return rg.presence.GetProxies(ctx)
 }
 
 type remoteClustersCacheKey struct {
@@ -1523,7 +1523,7 @@ type remoteClustersCacheKey struct {
 var _ map[remoteClustersCacheKey]struct{} // compile-time hashability check
 
 // GetRemoteClusters returns a list of remote clusters
-func (c *Cache) GetRemoteClusters(opts ...services.MarshalOption) ([]types.RemoteCluster, error) {
+func (c *Cache) GetRemoteClusters(ctx context.Context, opts ...services.MarshalOption) ([]types.RemoteCluster, error) {
 	rg, err := c.read()
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -1531,8 +1531,8 @@ func (c *Cache) GetRemoteClusters(opts ...services.MarshalOption) ([]types.Remot
 	defer rg.Release()
 	if !rg.IsCacheRead() {
 		ta := func(_ []types.RemoteCluster) {} // compile-time type assertion
-		ri, err := c.fnCache.Get(context.TODO(), remoteClustersCacheKey{}, func() (interface{}, error) {
-			remotes, err := rg.presence.GetRemoteClusters(opts...)
+		ri, err := c.fnCache.Get(ctx, remoteClustersCacheKey{}, func() (interface{}, error) {
+			remotes, err := rg.presence.GetRemoteClusters(c.ctx, opts...)
 			ta(remotes)
 			return remotes, err
 		})
@@ -1547,11 +1547,11 @@ func (c *Cache) GetRemoteClusters(opts ...services.MarshalOption) ([]types.Remot
 		}
 		return remotes, nil
 	}
-	return rg.presence.GetRemoteClusters(opts...)
+	return rg.presence.GetRemoteClusters(ctx, opts...)
 }
 
 // GetRemoteCluster returns a remote cluster by name
-func (c *Cache) GetRemoteCluster(clusterName string) (types.RemoteCluster, error) {
+func (c *Cache) GetRemoteCluster(ctx context.Context, clusterName string) (types.RemoteCluster, error) {
 	rg, err := c.read()
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -1559,8 +1559,8 @@ func (c *Cache) GetRemoteCluster(clusterName string) (types.RemoteCluster, error
 	defer rg.Release()
 	if !rg.IsCacheRead() {
 		ta := func(_ types.RemoteCluster) {} // compile-time type assertion
-		ri, err := c.fnCache.Get(context.TODO(), remoteClustersCacheKey{clusterName}, func() (interface{}, error) {
-			remote, err := rg.presence.GetRemoteCluster(clusterName)
+		ri, err := c.fnCache.Get(ctx, remoteClustersCacheKey{clusterName}, func() (interface{}, error) {
+			remote, err := rg.presence.GetRemoteCluster(c.ctx, clusterName)
 			ta(remote)
 			return remote, err
 		})
@@ -1571,13 +1571,13 @@ func (c *Cache) GetRemoteCluster(clusterName string) (types.RemoteCluster, error
 		ta(cachedRemote)
 		return cachedRemote.Clone(), nil
 	}
-	return rg.presence.GetRemoteCluster(clusterName)
+	return rg.presence.GetRemoteCluster(ctx, clusterName)
 }
 
 // GetUser is a part of auth.AccessPoint implementation.
-func (c *Cache) GetUser(name string, withSecrets bool) (user types.User, err error) {
+func (c *Cache) GetUser(ctx context.Context, name string, withSecrets bool) (user types.User, err error) {
 	if withSecrets { // cache never tracks user secrets
-		return c.Config.Users.GetUser(name, withSecrets)
+		return c.Config.Users.GetUser(ctx, name, withSecrets)
 	}
 	rg, err := c.read()
 	if err != nil {
@@ -1585,13 +1585,13 @@ func (c *Cache) GetUser(name string, withSecrets bool) (user types.User, err err
 	}
 	defer rg.Release()
 
-	user, err = rg.users.GetUser(name, withSecrets)
+	user, err = rg.users.GetUser(ctx, name, withSecrets)
 	if trace.IsNotFound(err) && rg.IsCacheRead() {
 		// release read lock early
 		rg.Release()
 		// fallback is sane because method is never used
 		// in construction of derivative caches.
-		if user, err := c.Config.Users.GetUser(name, withSecrets); err == nil {
+		if user, err := c.Config.Users.GetUser(ctx, name, withSecrets); err == nil {
 			return user, nil
 		}
 	}
@@ -1599,40 +1599,40 @@ func (c *Cache) GetUser(name string, withSecrets bool) (user types.User, err err
 }
 
 // GetUsers is a part of auth.AccessPoint implementation
-func (c *Cache) GetUsers(withSecrets bool) (users []types.User, err error) {
+func (c *Cache) GetUsers(ctx context.Context, withSecrets bool) (users []types.User, err error) {
 	if withSecrets { // cache never tracks user secrets
-		return c.Users.GetUsers(withSecrets)
+		return c.Users.GetUsers(ctx, withSecrets)
 	}
 	rg, err := c.read()
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 	defer rg.Release()
-	return rg.users.GetUsers(withSecrets)
+	return rg.users.GetUsers(ctx, withSecrets)
 }
 
 // GetTunnelConnections is a part of auth.AccessPoint implementation
 // GetTunnelConnections are not using recent cache as they are designed
 // to be called periodically and always return fresh data
-func (c *Cache) GetTunnelConnections(clusterName string, opts ...services.MarshalOption) ([]types.TunnelConnection, error) {
+func (c *Cache) GetTunnelConnections(ctx context.Context, clusterName string, opts ...services.MarshalOption) ([]types.TunnelConnection, error) {
 	rg, err := c.read()
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 	defer rg.Release()
-	return rg.presence.GetTunnelConnections(clusterName, opts...)
+	return rg.presence.GetTunnelConnections(ctx, clusterName, opts...)
 }
 
 // GetAllTunnelConnections is a part of auth.AccessPoint implementation
 // GetAllTunnelConnections are not using recent cache, as they are designed
 // to be called periodically and always return fresh data
-func (c *Cache) GetAllTunnelConnections(opts ...services.MarshalOption) (conns []types.TunnelConnection, err error) {
+func (c *Cache) GetAllTunnelConnections(ctx context.Context, opts ...services.MarshalOption) (conns []types.TunnelConnection, err error) {
 	rg, err := c.read()
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 	defer rg.Release()
-	return rg.presence.GetAllTunnelConnections(opts...)
+	return rg.presence.GetAllTunnelConnections(ctx, opts...)
 }
 
 // GetKubeServices is a part of auth.AccessPoint implementation

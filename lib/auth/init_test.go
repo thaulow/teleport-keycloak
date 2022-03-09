@@ -688,7 +688,7 @@ func TestMigrateOSS(t *testing.T) {
 		err = migrateOSS(ctx, as)
 		require.NoError(t, err)
 
-		out, err := as.GetUser(user.GetName(), false)
+		out, err := as.GetUser(context.TODO(), user.GetName(), false)
 		require.NoError(t, err)
 		require.Equal(t, []string{teleport.AdminRoleName}, out.GetRoles())
 		require.Equal(t, types.True, out.GetMetadata().Labels[teleport.OSSMigratedV6])

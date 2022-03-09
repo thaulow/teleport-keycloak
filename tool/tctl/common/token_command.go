@@ -113,13 +113,15 @@ func (c *TokenCommand) Initialize(app *kingpin.Application, config *service.Conf
 
 // TryRun takes the CLI command as an argument (like "nodes ls") and executes it.
 func (c *TokenCommand) TryRun(cmd string, client auth.ClientI) (match bool, err error) {
+	ctx := context.Background()
+
 	switch cmd {
 	case c.tokenAdd.FullCommand():
-		err = c.Add(client)
+		err = c.Add(ctx, client)
 	case c.tokenDel.FullCommand():
-		err = c.Del(client)
+		err = c.Del(ctx, client)
 	case c.tokenList.FullCommand():
-		err = c.List(client)
+		err = c.List(ctx, client)
 	default:
 		return false, nil
 	}
@@ -127,7 +129,7 @@ func (c *TokenCommand) TryRun(cmd string, client auth.ClientI) (match bool, err 
 }
 
 // Add is called to execute "tokens add ..." command.
-func (c *TokenCommand) Add(client auth.ClientI) error {
+func (c *TokenCommand) Add(ctx context.Context, client auth.ClientI) error {
 	// Parse string to see if it's a type of role that Teleport supports.
 	roles, err := types.ParseTeleportRoles(c.tokenType)
 	if err != nil {
@@ -143,7 +145,7 @@ func (c *TokenCommand) Add(client auth.ClientI) error {
 	}
 
 	// Generate token.
-	token, err := client.GenerateToken(context.TODO(), auth.GenerateTokenRequest{
+	token, err := client.GenerateToken(ctx, auth.GenerateTokenRequest{
 		Roles:  roles,
 		TTL:    c.ttl,
 		Token:  c.value,
@@ -155,7 +157,7 @@ func (c *TokenCommand) Add(client auth.ClientI) error {
 
 	// Calculate the CA pins for this cluster. The CA pins are used by the
 	// client to verify the identity of the Auth Server.
-	localCAResponse, err := client.GetClusterCACert()
+	localCAResponse, err := client.GetClusterCACert(ctx)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -165,7 +167,7 @@ func (c *TokenCommand) Add(client auth.ClientI) error {
 	}
 
 	// Get list of auth servers. Used to print friendly signup message.
-	authServers, err := client.GetAuthServers()
+	authServers, err := client.GetAuthServers(ctx)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -176,7 +178,7 @@ func (c *TokenCommand) Add(client auth.ClientI) error {
 	// Print signup message.
 	switch {
 	case roles.Include(types.RoleApp):
-		proxies, err := client.GetProxies()
+		proxies, err := client.GetProxies(ctx)
 		if err != nil {
 			return trace.Wrap(err)
 		}
@@ -196,7 +198,7 @@ func (c *TokenCommand) Add(client auth.ClientI) error {
 				"app_public_addr": appPublicAddr,
 			})
 	case roles.Include(types.RoleDatabase):
-		proxies, err := client.GetProxies()
+		proxies, err := client.GetProxies(ctx)
 		if err != nil {
 			return trace.Wrap(err)
 		}
@@ -231,8 +233,7 @@ func (c *TokenCommand) Add(client auth.ClientI) error {
 }
 
 // Del is called to execute "tokens del ..." command.
-func (c *TokenCommand) Del(client auth.ClientI) error {
-	ctx := context.TODO()
+func (c *TokenCommand) Del(ctx context.Context, client auth.ClientI) error {
 	if c.value == "" {
 		return trace.Errorf("Need an argument: token")
 	}
@@ -244,8 +245,7 @@ func (c *TokenCommand) Del(client auth.ClientI) error {
 }
 
 // List is called to execute "tokens ls" command.
-func (c *TokenCommand) List(client auth.ClientI) error {
-	ctx := context.TODO()
+func (c *TokenCommand) List(ctx context.Context, client auth.ClientI) error {
 	tokens, err := client.GetTokens(ctx)
 	if err != nil {
 		return trace.Wrap(err)

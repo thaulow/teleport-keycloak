@@ -222,7 +222,7 @@ func (g *GRPCServer) CreateAuditStream(stream proto.AuthService_CreateAuditStrea
 			if err != nil {
 				return trace.Wrap(err)
 			}
-			clusterName, err := auth.GetClusterName()
+			clusterName, err := auth.GetClusterName(stream.Context())
 			if err != nil {
 				return trace.Wrap(err)
 			}
@@ -306,7 +306,7 @@ func (g *GRPCServer) WatchEvents(watch *proto.Watch, stream proto.AuthService_Wa
 		servicesWatch.Kinds = append(servicesWatch.Kinds, proto.ToWatchKind(kind))
 	}
 
-	if clusterName, err := auth.GetClusterName(); err == nil {
+	if clusterName, err := auth.GetClusterName(stream.Context()); err == nil {
 		// we might want to enforce a filter for older clients in certain conditions
 		maybeFilterCertAuthorityWatches(stream.Context(), clusterName.GetClusterName(), auth.Checker.RoleNames(), &servicesWatch)
 	}
@@ -561,7 +561,7 @@ func (g *GRPCServer) GetUser(ctx context.Context, req *proto.GetUserRequest) (*t
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	user, err := auth.ServerWithRoles.GetUser(req.Name, req.WithSecrets)
+	user, err := auth.ServerWithRoles.GetUser(context.TODO(), req.Name, req.WithSecrets)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -578,7 +578,7 @@ func (g *GRPCServer) GetUsers(req *proto.GetUsersRequest, stream proto.AuthServi
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	users, err := auth.ServerWithRoles.GetUsers(req.WithSecrets)
+	users, err := auth.ServerWithRoles.GetUsers(stream.Context(), req.WithSecrets)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -1637,7 +1637,7 @@ func (g *GRPCServer) AddMFADevice(stream proto.AuthService_AddMFADeviceServer) e
 		return trace.Wrap(err)
 	}
 
-	clusterName, err := actx.GetClusterName()
+	clusterName, err := actx.GetClusterName(stream.Context())
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -1733,7 +1733,7 @@ func addMFADeviceRegisterChallenge(gctx *grpcContext, stream proto.AuthService_A
 	regChallenge := new(proto.MFARegisterChallenge)
 	switch initReq.Type {
 	case proto.AddMFADeviceRequestInit_TOTP:
-		otpKey, otpOpts, err := auth.newTOTPKey(user)
+		otpKey, otpOpts, err := auth.newTOTPKey(ctx, user)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
@@ -1756,7 +1756,7 @@ func addMFADeviceRegisterChallenge(gctx *grpcContext, stream proto.AuthService_A
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
-		challenge, err := u2f.RegisterInit(u2f.RegisterInitParams{
+		challenge, err := u2f.RegisterInit(stream.Context(), u2f.RegisterInitParams{
 			StorageKey: user,
 			AppConfig:  *u2fConfig,
 			Storage:    u2fStorage,
@@ -1920,7 +1920,7 @@ func (g *GRPCServer) DeleteMFADevice(stream proto.AuthService_DeleteMFADeviceSer
 			return trace.Wrap(err)
 		}
 
-		clusterName, err := actx.GetClusterName()
+		clusterName, err := actx.GetClusterName(stream.Context())
 		if err != nil {
 			return trace.Wrap(err)
 		}
@@ -2848,7 +2848,7 @@ func (g *GRPCServer) GetEvents(ctx context.Context, req *proto.GetEventsRequest)
 		return nil, trace.Wrap(err)
 	}
 
-	rawEvents, lastkey, err := auth.ServerWithRoles.SearchEvents(req.StartDate, req.EndDate, req.Namespace, req.EventTypes, int(req.Limit), types.EventOrder(req.Order), req.StartKey)
+	rawEvents, lastkey, err := auth.ServerWithRoles.SearchEvents(ctx, req.StartDate, req.EndDate, req.Namespace, req.EventTypes, int(req.Limit), types.EventOrder(req.Order), req.StartKey)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -2870,14 +2870,14 @@ func (g *GRPCServer) GetEvents(ctx context.Context, req *proto.GetEventsRequest)
 	return res, nil
 }
 
-// GetEvents searches for session events on the backend and sends them back in a response.
+// GetSessionEvents searches for session events on the backend and sends them back in a response.
 func (g *GRPCServer) GetSessionEvents(ctx context.Context, req *proto.GetSessionEventsRequest) (*proto.Events, error) {
 	auth, err := g.authenticate(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
-	rawEvents, lastkey, err := auth.ServerWithRoles.SearchSessionEvents(req.StartDate, req.EndDate, int(req.Limit), types.EventOrder(req.Order), req.StartKey)
+	rawEvents, lastkey, err := auth.ServerWithRoles.SearchSessionEvents(ctx, req.StartDate, req.EndDate, int(req.Limit), types.EventOrder(req.Order), req.StartKey)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

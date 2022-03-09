@@ -61,11 +61,11 @@ func (s *Server) CreateAppSession(ctx context.Context, req types.CreateAppSessio
 	}
 
 	// Create certificate for this session.
-	privateKey, publicKey, err := s.GetNewKeyPairFromPool()
+	privateKey, publicKey, err := s.GetNewKeyPairFromPool(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	certs, err := s.generateUserCert(certRequest{
+	certs, err := s.generateUserCert(ctx, certRequest{
 		user:           user,
 		publicKey:      publicKey,
 		checker:        checker,
@@ -156,13 +156,13 @@ func WaitForAppSession(ctx context.Context, sessionID, user string, ap AccessPoi
 
 // generateAppToken generates an JWT token that will be passed along with every
 // application request.
-func (s *Server) generateAppToken(username string, roles []string, uri string, expires time.Time) (string, error) {
+func (s *Server) generateAppToken(ctx context.Context, username string, roles []string, uri string, expires time.Time) (string, error) {
 	// Get the clusters CA.
-	clusterName, err := s.GetDomainName()
+	clusterName, err := s.GetDomainName(ctx)
 	if err != nil {
 		return "", trace.Wrap(err)
 	}
-	ca, err := s.GetCertAuthority(types.CertAuthID{
+	ca, err := s.GetCertAuthority(ctx, types.CertAuthID{
 		Type:       types.JWTSigner,
 		DomainName: clusterName,
 	}, true)
@@ -196,7 +196,7 @@ func (s *Server) createWebSession(ctx context.Context, req types.NewWebSessionRe
 	// It's safe to extract the roles and traits directly from services.User
 	// because this occurs during the user creation process and services.User
 	// is not fetched from the backend.
-	session, err := s.NewWebSession(req)
+	session, err := s.NewWebSession(ctx, req)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -209,7 +209,7 @@ func (s *Server) createWebSession(ctx context.Context, req types.NewWebSessionRe
 	return session, nil
 }
 
-func (s *Server) createSessionCert(user types.User, sessionTTL time.Duration, publicKey []byte, compatibility, routeToCluster, kubernetesCluster string) ([]byte, []byte, error) {
+func (s *Server) createSessionCert(ctx context.Context, user types.User, sessionTTL time.Duration, publicKey []byte, compatibility, routeToCluster, kubernetesCluster string) ([]byte, []byte, error) {
 	// It's safe to extract the roles and traits directly from services.User
 	// because this occurs during the user creation process and services.User
 	// is not fetched from the backend.
@@ -218,7 +218,7 @@ func (s *Server) createSessionCert(user types.User, sessionTTL time.Duration, pu
 		return nil, nil, trace.Wrap(err)
 	}
 
-	certs, err := s.generateUserCert(certRequest{
+	certs, err := s.generateUserCert(ctx, certRequest{
 		user:              user,
 		ttl:               sessionTTL,
 		publicKey:         publicKey,

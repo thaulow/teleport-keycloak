@@ -41,7 +41,7 @@ func (s *Server) newStreamWriter(sessionCtx *common.Session) (libevents.StreamWr
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	clusterName, err := s.cfg.AccessPoint.GetClusterName()
+	clusterName, err := s.cfg.AccessPoint.GetClusterName(s.closeContext)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

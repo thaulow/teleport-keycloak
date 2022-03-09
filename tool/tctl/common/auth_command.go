@@ -120,15 +120,17 @@ func (a *AuthCommand) Initialize(app *kingpin.Application, config *service.Confi
 // TryRun takes the CLI command as an argument (like "auth gen") and executes it
 // or returns match=false if 'cmd' does not belong to it
 func (a *AuthCommand) TryRun(cmd string, client auth.ClientI) (match bool, err error) {
+	ctx := context.Background()
+
 	switch cmd {
 	case a.authGenerate.FullCommand():
-		err = a.GenerateKeys()
+		err = a.GenerateKeys(ctx)
 	case a.authExport.FullCommand():
-		err = a.ExportAuthorities(client)
+		err = a.ExportAuthorities(ctx, client)
 	case a.authSign.FullCommand():
-		err = a.GenerateAndSignKeys(client)
+		err = a.GenerateAndSignKeys(ctx, client)
 	case a.authRotate.FullCommand():
-		err = a.RotateCertAuthority(client)
+		err = a.RotateCertAuthority(ctx, client)
 	default:
 		return false, nil
 	}
@@ -138,16 +140,16 @@ func (a *AuthCommand) TryRun(cmd string, client auth.ClientI) (match bool, err e
 // ExportAuthorities outputs the list of authorities in OpenSSH compatible formats
 // If --type flag is given, only prints keys for CAs of this type, otherwise
 // prints all keys
-func (a *AuthCommand) ExportAuthorities(client auth.ClientI) error {
+func (a *AuthCommand) ExportAuthorities(ctx context.Context, client auth.ClientI) error {
 	var typesToExport []types.CertAuthType
 
 	// this means to export TLS authority
 	if a.authType == "tls" {
-		clusterName, err := client.GetDomainName()
+		clusterName, err := client.GetDomainName(ctx)
 		if err != nil {
 			return trace.Wrap(err)
 		}
-		certAuthority, err := client.GetCertAuthority(
+		certAuthority, err := client.GetCertAuthority(ctx,
 			types.CertAuthID{Type: types.HostCA, DomainName: clusterName},
 			a.exportPrivateKeys)
 		if err != nil {
@@ -174,7 +176,7 @@ func (a *AuthCommand) ExportAuthorities(client auth.ClientI) error {
 		}
 		typesToExport = []types.CertAuthType{authType}
 	}
-	localAuthName, err := client.GetDomainName()
+	localAuthName, err := client.GetDomainName(ctx)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -183,7 +185,7 @@ func (a *AuthCommand) ExportAuthorities(client auth.ClientI) error {
 	// trusted ones)
 	var authorities []types.CertAuthority
 	for _, at := range typesToExport {
-		cas, err := client.GetCertAuthorities(at, a.exportPrivateKeys)
+		cas, err := client.GetCertAuthorities(ctx, at, a.exportPrivateKeys)
 		if err != nil {
 			return trace.Wrap(err)
 		}
@@ -253,10 +255,10 @@ func (a *AuthCommand) ExportAuthorities(client auth.ClientI) error {
 }
 
 // GenerateKeys generates a new keypair
-func (a *AuthCommand) GenerateKeys() error {
-	keygen := native.New(context.TODO(), native.PrecomputeKeys(0))
+func (a *AuthCommand) GenerateKeys(ctx context.Context) error {
+	keygen := native.New(ctx, native.PrecomputeKeys(0))
 	defer keygen.Close()
-	privBytes, pubBytes, err := keygen.GenerateKeyPair("")
+	privBytes, pubBytes, err := keygen.GenerateKeyPair(ctx, "")
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -275,21 +277,21 @@ func (a *AuthCommand) GenerateKeys() error {
 }
 
 // GenerateAndSignKeys generates a new keypair and signs it for role
-func (a *AuthCommand) GenerateAndSignKeys(clusterAPI auth.ClientI) error {
+func (a *AuthCommand) GenerateAndSignKeys(ctx context.Context, clusterAPI auth.ClientI) error {
 	switch {
 	case a.outputFormat == identityfile.FormatDatabase || a.outputFormat == identityfile.FormatMongo:
-		return a.generateDatabaseKeys(clusterAPI)
+		return a.generateDatabaseKeys(ctx, clusterAPI)
 	case a.genUser != "" && a.genHost == "":
-		return a.generateUserKeys(clusterAPI)
+		return a.generateUserKeys(ctx, clusterAPI)
 	case a.genUser == "" && a.genHost != "":
-		return a.generateHostKeys(clusterAPI)
+		return a.generateHostKeys(ctx, clusterAPI)
 	default:
 		return trace.BadParameter("--user or --host must be specified")
 	}
 }
 
 // RotateCertAuthority starts or restarts certificate authority rotation process
-func (a *AuthCommand) RotateCertAuthority(client auth.ClientI) error {
+func (a *AuthCommand) RotateCertAuthority(ctx context.Context, client auth.ClientI) error {
 	req := auth.RotateRequest{
 		Type:        types.CertAuthType(a.rotateType),
 		GracePeriod: &a.rotateGracePeriod,
@@ -300,7 +302,7 @@ func (a *AuthCommand) RotateCertAuthority(client auth.ClientI) error {
 	} else {
 		req.Mode = types.RotationModeAuto
 	}
-	if err := client.RotateCertAuthority(req); err != nil {
+	if err := client.RotateCertAuthority(ctx, req); err != nil {
 		return err
 	}
 	if a.rotateTargetPhase != "" {
@@ -312,7 +314,7 @@ func (a *AuthCommand) RotateCertAuthority(client auth.ClientI) error {
 	return nil
 }
 
-func (a *AuthCommand) generateHostKeys(clusterAPI auth.ClientI) error {
+func (a *AuthCommand) generateHostKeys(ctx context.Context, clusterAPI auth.ClientI) error {
 	// only format=openssh is supported
 	if a.outputFormat != identityfile.FormatOpenSSH {
 		return trace.BadParameter("invalid --format flag %q, only %q is supported", a.outputFormat, identityfile.FormatOpenSSH)
@@ -327,19 +329,19 @@ func (a *AuthCommand) generateHostKeys(clusterAPI auth.ClientI) error {
 		return trace.Wrap(err)
 	}
 
-	cn, err := clusterAPI.GetClusterName()
+	cn, err := clusterAPI.GetClusterName(ctx)
 	if err != nil {
 		return trace.Wrap(err)
 	}
 	clusterName := cn.GetClusterName()
 
-	key.Cert, err = clusterAPI.GenerateHostCert(key.Pub,
+	key.Cert, err = clusterAPI.GenerateHostCert(ctx, key.Pub,
 		"", "", principals,
 		clusterName, types.SystemRoles{types.RoleNode}, 0)
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	hostCAs, err := clusterAPI.GetCertAuthorities(types.HostCA, false)
+	hostCAs, err := clusterAPI.GetCertAuthorities(ctx, types.HostCA, false)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -366,17 +368,17 @@ func (a *AuthCommand) generateHostKeys(clusterAPI auth.ClientI) error {
 
 // generateDatabaseKeys generates a new unsigned key and signs it with Teleport
 // CA for database access.
-func (a *AuthCommand) generateDatabaseKeys(clusterAPI auth.ClientI) error {
+func (a *AuthCommand) generateDatabaseKeys(ctx context.Context, clusterAPI auth.ClientI) error {
 	key, err := client.NewKey()
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	return a.generateDatabaseKeysForKey(clusterAPI, key)
+	return a.generateDatabaseKeysForKey(ctx, clusterAPI, key)
 }
 
 // generateDatabaseKeysForKey signs the provided unsigned key with Teleport CA
 // for database access.
-func (a *AuthCommand) generateDatabaseKeysForKey(clusterAPI auth.ClientI, key *client.Key) error {
+func (a *AuthCommand) generateDatabaseKeysForKey(ctx context.Context, clusterAPI auth.ClientI, key *client.Key) error {
 	subject := pkix.Name{CommonName: a.genHost}
 	if a.outputFormat == identityfile.FormatMongo {
 		// Include Organization attribute in MongoDB certificates as well.
@@ -389,7 +391,7 @@ func (a *AuthCommand) generateDatabaseKeysForKey(clusterAPI auth.ClientI, key *c
 		// The actual O value doesn't matter as long as it matches on all
 		// MongoDB cluster members so set it to the Teleport cluster name
 		// to avoid hardcoding anything.
-		clusterName, err := clusterAPI.GetClusterName()
+		clusterName, err := clusterAPI.GetClusterName(ctx)
 		if err != nil {
 			return trace.Wrap(err)
 		}
@@ -401,7 +403,7 @@ func (a *AuthCommand) generateDatabaseKeysForKey(clusterAPI auth.ClientI, key *c
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	resp, err := clusterAPI.GenerateDatabaseCert(context.TODO(),
+	resp, err := clusterAPI.GenerateDatabaseCert(ctx,
 		&proto.DatabaseCertRequest{
 			CSR: csr,
 			// Important to include server name as SAN since CommonName has
@@ -474,9 +476,9 @@ net:
 `))
 )
 
-func (a *AuthCommand) generateUserKeys(clusterAPI auth.ClientI) error {
+func (a *AuthCommand) generateUserKeys(ctx context.Context, clusterAPI auth.ClientI) error {
 	// Validate --proxy flag.
-	if err := a.checkProxyAddr(clusterAPI); err != nil {
+	if err := a.checkProxyAddr(ctx, clusterAPI); err != nil {
 		return trace.Wrap(err)
 	}
 	// parse compatibility parameter
@@ -492,11 +494,11 @@ func (a *AuthCommand) generateUserKeys(clusterAPI auth.ClientI) error {
 	}
 
 	if a.leafCluster != "" {
-		if err := a.checkLeafCluster(clusterAPI); err != nil {
+		if err := a.checkLeafCluster(ctx, clusterAPI); err != nil {
 			return trace.Wrap(err)
 		}
 	} else {
-		cn, err := clusterAPI.GetClusterName()
+		cn, err := clusterAPI.GetClusterName(ctx)
 		if err != nil {
 			return trace.Wrap(err)
 		}
@@ -504,7 +506,7 @@ func (a *AuthCommand) generateUserKeys(clusterAPI auth.ClientI) error {
 	}
 	key.ClusterName = a.leafCluster
 
-	if err := a.checkKubeCluster(clusterAPI); err != nil {
+	if err := a.checkKubeCluster(ctx, clusterAPI); err != nil {
 		return trace.Wrap(err)
 	}
 
@@ -523,7 +525,7 @@ func (a *AuthCommand) generateUserKeys(clusterAPI auth.ClientI) error {
 	key.Cert = certs.SSH
 	key.TLSCert = certs.TLS
 
-	hostCAs, err := clusterAPI.GetCertAuthorities(types.HostCA, false)
+	hostCAs, err := clusterAPI.GetCertAuthorities(ctx, types.HostCA, false)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -544,7 +546,7 @@ func (a *AuthCommand) generateUserKeys(clusterAPI auth.ClientI) error {
 	return nil
 }
 
-func (a *AuthCommand) checkLeafCluster(clusterAPI auth.ClientI) error {
+func (a *AuthCommand) checkLeafCluster(ctx context.Context, clusterAPI auth.ClientI) error {
 	if a.outputFormat != identityfile.FormatKubernetes && a.leafCluster != "" {
 		// User set --cluster but it's not actually used for the chosen --format.
 		// Print a warning but continue.
@@ -555,7 +557,7 @@ func (a *AuthCommand) checkLeafCluster(clusterAPI auth.ClientI) error {
 		return nil
 	}
 
-	clusters, err := clusterAPI.GetRemoteClusters()
+	clusters, err := clusterAPI.GetRemoteClusters(ctx)
 	if err != nil {
 		return trace.WrapWithMessage(err, "couldn't load leaf clusters")
 	}
@@ -570,7 +572,7 @@ func (a *AuthCommand) checkLeafCluster(clusterAPI auth.ClientI) error {
 
 }
 
-func (a *AuthCommand) checkKubeCluster(clusterAPI auth.ClientI) error {
+func (a *AuthCommand) checkKubeCluster(ctx context.Context, clusterAPI auth.ClientI) error {
 	if a.outputFormat != identityfile.FormatKubernetes && a.kubeCluster != "" {
 		// User set --kube-cluster-name but it's not actually used for the chosen --format.
 		// Print a warning but continue.
@@ -580,7 +582,7 @@ func (a *AuthCommand) checkKubeCluster(clusterAPI auth.ClientI) error {
 		return nil
 	}
 
-	localCluster, err := clusterAPI.GetClusterName()
+	localCluster, err := clusterAPI.GetClusterName(ctx)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -597,7 +599,7 @@ func (a *AuthCommand) checkKubeCluster(clusterAPI auth.ClientI) error {
 	return nil
 }
 
-func (a *AuthCommand) checkProxyAddr(clusterAPI auth.ClientI) error {
+func (a *AuthCommand) checkProxyAddr(ctx context.Context, clusterAPI auth.ClientI) error {
 	if a.outputFormat != identityfile.FormatKubernetes && a.proxyAddr != "" {
 		// User set --proxy but it's not actually used for the chosen --format.
 		// Print a warning but continue.
@@ -620,7 +622,7 @@ func (a *AuthCommand) checkProxyAddr(clusterAPI auth.ClientI) error {
 		return trace.Wrap(err)
 	}
 	// Fetch proxies known to auth server and try to find a public address.
-	proxies, err := clusterAPI.GetProxies()
+	proxies, err := clusterAPI.GetProxies(ctx)
 	if err != nil {
 		return trace.WrapWithMessage(err, "couldn't load registered proxies, try setting --proxy manually")
 	}

@@ -350,7 +350,7 @@ func NewServerContext(ctx context.Context, parent *sshutils.ConnectionContext, s
 		trace.ComponentFields: fields,
 	})
 
-	lockTargets, err := ComputeLockTargets(srv, identityContext)
+	lockTargets, err := ComputeLockTargets(ctx, srv, identityContext)
 	if err != nil {
 		return nil, nil, trace.Wrap(err)
 	}
@@ -680,14 +680,14 @@ func (c *ServerContext) SendSubsystemResult(r SubsystemResult) {
 // ProxyPublicAddress tries to get the public address from the first
 // available proxy. if public_address is not set, fall back to the hostname
 // of the first proxy we get back.
-func (c *ServerContext) ProxyPublicAddress() string {
+func (c *ServerContext) ProxyPublicAddress(ctx context.Context) string {
 	proxyHost := "<proxyhost>:3080"
 
 	if c.srv == nil {
 		return proxyHost
 	}
 
-	proxies, err := c.srv.GetAccessPoint().GetProxies()
+	proxies, err := c.srv.GetAccessPoint().GetProxies(ctx)
 	if err != nil {
 		c.Errorf("Unable to retrieve proxy list: %v", err)
 	}
@@ -707,7 +707,7 @@ func (c *ServerContext) String() string {
 	return fmt.Sprintf("ServerContext(%v->%v, user=%v, id=%v)", c.ServerConn.RemoteAddr(), c.ServerConn.LocalAddr(), c.ServerConn.User(), c.id)
 }
 
-func getPAMConfig(c *ServerContext) (*PAMConfig, error) {
+func getPAMConfig(ctx context.Context, c *ServerContext) (*PAMConfig, error) {
 	// PAM should be disabled.
 	if c.srv.Component() != teleport.ComponentNode {
 		return nil, nil
@@ -735,7 +735,7 @@ func getPAMConfig(c *ServerContext) (*PAMConfig, error) {
 	environment["TELEPORT_LOGIN"] = c.Identity.Login
 	environment["TELEPORT_ROLES"] = strings.Join(roleNames, " ")
 	if localPAMConfig.Environment != nil {
-		user, err := c.srv.GetAccessPoint().GetUser(c.Identity.TeleportUser, false)
+		user, err := c.srv.GetAccessPoint().GetUser(ctx, c.Identity.TeleportUser, false)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
@@ -804,7 +804,7 @@ func (c *ServerContext) ExecCommand() (*ExecCommand, error) {
 		return nil, trace.Wrap(err)
 	}
 
-	pamConfig, err := getPAMConfig(c)
+	pamConfig, err := getPAMConfig(c.cancelContext, c)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -876,7 +876,7 @@ func buildEnvironment(ctx *ServerContext) []string {
 	// Set some Teleport specific environment variables: SSH_TELEPORT_USER,
 	// SSH_SESSION_WEBPROXY_ADDR, SSH_TELEPORT_HOST_UUID, and
 	// SSH_TELEPORT_CLUSTER_NAME.
-	env = append(env, teleport.SSHSessionWebproxyAddr+"="+ctx.ProxyPublicAddress())
+	env = append(env, teleport.SSHSessionWebproxyAddr+"="+ctx.ProxyPublicAddress(ctx.cancelContext))
 	env = append(env, teleport.SSHTeleportHostUUID+"="+ctx.srv.ID())
 	env = append(env, teleport.SSHTeleportClusterName+"="+ctx.ClusterName)
 	env = append(env, teleport.SSHTeleportUser+"="+ctx.Identity.TeleportUser)
@@ -925,8 +925,8 @@ func newUaccMetadata(c *ServerContext) (*UaccMetadata, error) {
 
 // ComputeLockTargets computes lock targets inferred from a Server
 // and an IdentityContext.
-func ComputeLockTargets(s Server, id IdentityContext) ([]types.LockTarget, error) {
-	clusterName, err := s.GetAccessPoint().GetClusterName()
+func ComputeLockTargets(ctx context.Context, s Server, id IdentityContext) ([]types.LockTarget, error) {
+	clusterName, err := s.GetAccessPoint().GetClusterName(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

@@ -488,7 +488,7 @@ func (s *ProxyServer) authorize(ctx context.Context, user, database string) (*pr
 // getDatabaseServers finds database servers that proxy the database instance
 // encoded in the provided identity.
 func (s *ProxyServer) getDatabaseServers(ctx context.Context, identity tlsca.Identity) (reversetunnel.RemoteSite, []types.DatabaseServer, error) {
-	cluster, err := s.cfg.Tunnel.GetSite(identity.RouteToCluster)
+	cluster, err := s.cfg.Tunnel.GetSite(ctx, identity.RouteToCluster)
 	if err != nil {
 		return nil, nil, trace.Wrap(err)
 	}
@@ -520,7 +520,7 @@ func (s *ProxyServer) getDatabaseServers(ctx context.Context, identity tlsca.Ide
 // getConfigForServer returns TLS config used for establishing connection
 // to a remote database server over reverse tunnel.
 func (s *ProxyServer) getConfigForServer(ctx context.Context, identity tlsca.Identity, server types.DatabaseServer) (*tls.Config, error) {
-	privateKeyBytes, _, err := native.GenerateKeyPair("")
+	privateKeyBytes, _, err := native.GenerateKeyPair(ctx, "")
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

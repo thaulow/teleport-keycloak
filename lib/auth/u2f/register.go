@@ -72,8 +72,8 @@ func NewChallenge(appID string, trustedFacets []string) (*Challenge, error) {
 type RegistrationStorage interface {
 	DeviceStorage
 
-	UpsertU2FRegisterChallenge(key string, challenge *Challenge) error
-	GetU2FRegisterChallenge(key string) (*Challenge, error)
+	UpsertU2FRegisterChallenge(ctx context.Context, key string, challenge *Challenge) error
+	GetU2FRegisterChallenge(ctx context.Context, key string) (*Challenge, error)
 }
 
 type inMemoryRegistrationStorage struct {
@@ -93,11 +93,11 @@ func InMemoryRegistrationStorage(ds DeviceStorage) (RegistrationStorage, error) 
 	return inMemoryRegistrationStorage{DeviceStorage: ds, challenges: m}, nil
 }
 
-func (s inMemoryRegistrationStorage) UpsertU2FRegisterChallenge(key string, c *Challenge) error {
+func (s inMemoryRegistrationStorage) UpsertU2FRegisterChallenge(ctx context.Context, key string, c *Challenge) error {
 	return s.challenges.Set(key, c, inMemoryChallengeTTL)
 }
 
-func (s inMemoryRegistrationStorage) GetU2FRegisterChallenge(key string) (*Challenge, error) {
+func (s inMemoryRegistrationStorage) GetU2FRegisterChallenge(ctx context.Context, key string) (*Challenge, error) {
 	v, ok := s.challenges.Get(key)
 	if !ok {
 		return nil, trace.NotFound("U2F challenge not found or expired")
@@ -119,13 +119,13 @@ type RegisterInitParams struct {
 
 // RegisterInit is the first step in the registration sequence. It runs on the
 // server and the returned RegisterChallenge must be sent to the client.
-func RegisterInit(params RegisterInitParams) (*RegisterChallenge, error) {
+func RegisterInit(ctx context.Context, params RegisterInitParams) (*RegisterChallenge, error) {
 	c, err := NewChallenge(params.AppConfig.AppID, params.AppConfig.Facets)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
-	err = params.Storage.UpsertU2FRegisterChallenge(params.StorageKey, c)
+	err = params.Storage.UpsertU2FRegisterChallenge(ctx, params.StorageKey, c)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -197,7 +197,7 @@ type RegisterVerifyParams struct {
 // server and verifies the RegisterChallengeResponse returned by the client.
 func RegisterVerify(ctx context.Context, params RegisterVerifyParams) (*types.MFADevice, error) {
 	// TODO(awly): mfa: prevent the same key being registered twice.
-	challenge, err := params.Storage.GetU2FRegisterChallenge(params.ChallengeStorageKey)
+	challenge, err := params.Storage.GetU2FRegisterChallenge(ctx, params.ChallengeStorageKey)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

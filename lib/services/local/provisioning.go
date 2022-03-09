@@ -64,9 +64,9 @@ func (s *ProvisioningService) UpsertToken(ctx context.Context, p types.Provision
 }
 
 // DeleteAllTokens deletes all provisioning tokens
-func (s *ProvisioningService) DeleteAllTokens() error {
+func (s *ProvisioningService) DeleteAllTokens(ctx context.Context) error {
 	startKey := backend.Key(tokensPrefix)
-	return s.DeleteRange(context.TODO(), startKey, backend.RangeEnd(startKey))
+	return s.DeleteRange(ctx, startKey, backend.RangeEnd(startKey))
 }
 
 // GetToken finds and returns token by ID

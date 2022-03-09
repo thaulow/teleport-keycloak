@@ -363,7 +363,7 @@ func (p *proxyCollector) resourceKind() string {
 // getResourcesAndUpdateCurrent is called when the resources should be
 // (re-)fetched directly.
 func (p *proxyCollector) getResourcesAndUpdateCurrent(ctx context.Context) error {
-	proxies, err := p.ProxyGetter.GetProxies()
+	proxies, err := p.ProxyGetter.GetProxies(ctx)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -731,7 +731,7 @@ func (c *caCollector) getResourcesAndUpdateCurrent(ctx context.Context) error {
 	)
 
 	if c.WatchHostCA {
-		host, err := c.AuthorityGetter.GetCertAuthorities(types.HostCA, false)
+		host, err := c.AuthorityGetter.GetCertAuthorities(ctx, types.HostCA, false)
 		if err != nil {
 			return trace.Wrap(err)
 		}
@@ -742,7 +742,7 @@ func (c *caCollector) getResourcesAndUpdateCurrent(ctx context.Context) error {
 	}
 
 	if c.WatchUserCA {
-		user, err := c.AuthorityGetter.GetCertAuthorities(types.UserCA, false)
+		user, err := c.AuthorityGetter.GetCertAuthorities(ctx, types.UserCA, false)
 		if err != nil {
 			return trace.Wrap(err)
 		}

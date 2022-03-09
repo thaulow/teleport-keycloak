@@ -84,7 +84,7 @@ type TerminalRequest struct {
 // AuthProvider is a subset of the full Auth API.
 type AuthProvider interface {
 	GetNodes(ctx context.Context, namespace string, opts ...services.MarshalOption) ([]types.Server, error)
-	GetSessionEvents(namespace string, sid session.ID, after int, includePrintEvents bool) ([]events.EventFields, error)
+	GetSessionEvents(ctx context.Context, namespace string, sid session.ID, after int, includePrintEvents bool) ([]events.EventFields, error)
 }
 
 // NewTerminal creates a web-based terminal based on WebSockets and returns a

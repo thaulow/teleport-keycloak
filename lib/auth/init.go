@@ -195,7 +195,7 @@ func Init(cfg InitConfig, opts ...ServerOption) (*Server, error) {
 	// if resources are supplied, use them to bootstrap backend state
 	// on initial startup.
 	if len(cfg.Resources) > 0 {
-		firstStart, err := isFirstStart(asrv, cfg)
+		firstStart, err := isFirstStart(ctx, asrv, cfg)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
@@ -229,7 +229,7 @@ func Init(cfg InitConfig, opts ...ServerOption) (*Server, error) {
 		// Don't re-create CA if it already exists, otherwise
 		// the existing cluster configuration will be corrupted;
 		// this part of code is only used in tests.
-		if err := asrv.Trust.CreateCertAuthority(ca); err != nil {
+		if err := asrv.Trust.CreateCertAuthority(ctx, ca); err != nil {
 			if !trace.IsAlreadyExists(err) {
 				return nil, trace.Wrap(err)
 			}
@@ -238,7 +238,7 @@ func Init(cfg InitConfig, opts ...ServerOption) (*Server, error) {
 		}
 	}
 	for _, tunnel := range cfg.ReverseTunnels {
-		if err := asrv.UpsertReverseTunnel(tunnel); err != nil {
+		if err := asrv.UpsertReverseTunnel(ctx, tunnel); err != nil {
 			return nil, trace.Wrap(err)
 		}
 		log.Infof("Created reverse tunnel: %v.", tunnel)
@@ -267,7 +267,7 @@ func Init(cfg InitConfig, opts ...ServerOption) (*Server, error) {
 	// The first Auth Server that starts gets to set the name of the cluster.
 	// If a cluster name/ID is already stored in the backend, the attempt to set
 	// a new name returns an AlreadyExists error.
-	err = asrv.SetClusterName(cfg.ClusterName)
+	err = asrv.SetClusterName(ctx, cfg.ClusterName)
 	if err != nil && !trace.IsAlreadyExists(err) {
 		return nil, trace.Wrap(err)
 	}
@@ -275,7 +275,7 @@ func Init(cfg InitConfig, opts ...ServerOption) (*Server, error) {
 	// is trying to change the name.
 	if trace.IsAlreadyExists(err) {
 		// Get current name of cluster from the backend.
-		cn, err := asrv.ClusterConfiguration.GetClusterName()
+		cn, err := asrv.ClusterConfiguration.GetClusterName(ctx)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
@@ -294,14 +294,14 @@ func Init(cfg InitConfig, opts ...ServerOption) (*Server, error) {
 	}
 	log.Debugf("Cluster configuration: %v.", cfg.ClusterName)
 
-	err = asrv.SetStaticTokens(cfg.StaticTokens)
+	err = asrv.SetStaticTokens(ctx, cfg.StaticTokens)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 	log.Infof("Updating cluster configuration: %v.", cfg.StaticTokens)
 
 	// always create the default namespace
-	err = asrv.UpsertNamespace(types.DefaultNamespace())
+	err = asrv.UpsertNamespace(ctx, types.DefaultNamespace())
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -309,7 +309,7 @@ func Init(cfg InitConfig, opts ...ServerOption) (*Server, error) {
 
 	// always create a default admin role
 	defaultRole := services.NewAdminRole()
-	err = asrv.CreateRole(defaultRole)
+	err = asrv.CreateRole(ctx, defaultRole)
 	if err != nil && !trace.IsAlreadyExists(err) {
 		return nil, trace.Wrap(err)
 	}
@@ -320,13 +320,13 @@ func Init(cfg InitConfig, opts ...ServerOption) (*Server, error) {
 	// generate certificate authorities if they don't exist
 	for _, caType := range []types.CertAuthType{types.HostCA, types.UserCA, types.JWTSigner} {
 		caID := types.CertAuthID{Type: caType, DomainName: cfg.ClusterName.GetClusterName()}
-		ca, err := asrv.GetCertAuthority(caID, true)
+		ca, err := asrv.GetCertAuthority(ctx, caID, true)
 		if err != nil {
 			if !trace.IsNotFound(err) {
 				return nil, trace.Wrap(err)
 			}
 			log.Infof("First start: generating %s certificate authority.", caID.Type)
-			if err := asrv.createSelfSignedCA(caID); err != nil {
+			if err := asrv.createSelfSignedCA(ctx, caID); err != nil {
 				return nil, trace.Wrap(err)
 			}
 		} else {
@@ -345,11 +345,11 @@ func Init(cfg InitConfig, opts ...ServerOption) (*Server, error) {
 					// without any active keys. These keys will not be used for
 					// any signing operations until a CA rotation. Only the Host
 					// CA is necessary to issue the Admin identity.
-					if err := asrv.ensureLocalAdditionalKeys(ca); err != nil {
+					if err := asrv.ensureLocalAdditionalKeys(ctx, ca); err != nil {
 						return nil, trace.Wrap(err)
 					}
 					// reload updated CA for below checks
-					if ca, err = asrv.GetCertAuthority(caID, true); err != nil {
+					if ca, err = asrv.GetCertAuthority(ctx, caID, true); err != nil {
 						return nil, trace.Wrap(err)
 					}
 				}
@@ -369,7 +369,7 @@ func Init(cfg InitConfig, opts ...ServerOption) (*Server, error) {
 
 	// Delete any unused keys from the keyStore. This is to avoid exhausting
 	// (or wasting) HSM resources.
-	if err := asrv.deleteUnusedKeys(); err != nil {
+	if err := asrv.deleteUnusedKeys(ctx); err != nil {
 		return nil, trace.Wrap(err)
 	}
 
@@ -394,7 +394,7 @@ func Init(cfg InitConfig, opts ...ServerOption) (*Server, error) {
 
 	if !cfg.SkipPeriodicOperations {
 		log.Infof("Auth server is running periodic operations.")
-		go asrv.runPeriodicOperations()
+		go asrv.runPeriodicOperations(ctx)
 	} else {
 		log.Infof("Auth server is skipping periodic operations.")
 	}
@@ -525,7 +525,7 @@ func createPresets(ctx context.Context, asrv *Server) error {
 		services.NewPresetAccessRole(),
 		services.NewPresetAuditorRole()}
 	for _, role := range roles {
-		err := asrv.CreateRole(role)
+		err := asrv.CreateRole(ctx, role)
 		if err != nil {
 			if !trace.IsAlreadyExists(err) {
 				return trace.Wrap(err, "failed to create preset role")
@@ -614,7 +614,7 @@ func migrateOSSTrustedClusters(ctx context.Context, role types.Role, asrv *Serve
 			return migratedTcs, trace.Wrap(err, migrationAbortedMessage)
 		}
 		for _, catype := range []types.CertAuthType{types.UserCA, types.HostCA} {
-			ca, err := asrv.GetCertAuthority(types.CertAuthID{Type: catype, DomainName: tc.GetName()}, true)
+			ca, err := asrv.GetCertAuthority(ctx, types.CertAuthID{Type: catype, DomainName: tc.GetName()}, true)
 			if err != nil {
 				return migratedTcs, trace.Wrap(err, migrationAbortedMessage)
 			}
@@ -626,7 +626,7 @@ func migrateOSSTrustedClusters(ctx context.Context, role types.Role, asrv *Serve
 			setLabels(&meta.Labels, teleport.OSSMigratedV6, types.True)
 			ca.SetRoleMap(roleMap)
 			ca.SetMetadata(meta)
-			err = asrv.UpsertCertAuthority(ca)
+			err = asrv.UpsertCertAuthority(ctx, ca)
 			if err != nil {
 				return migratedTcs, trace.Wrap(err, migrationAbortedMessage)
 			}
@@ -641,7 +641,7 @@ func migrateOSSTrustedClusters(ctx context.Context, role types.Role, asrv *Serve
 // role that is read only and only lets users use assigned logins.
 func migrateOSSUsers(ctx context.Context, role types.Role, asrv *Server) (int, error) {
 	migratedUsers := 0
-	users, err := asrv.GetUsers(true)
+	users, err := asrv.GetUsers(ctx, true)
 	if err != nil {
 		return migratedUsers, trace.Wrap(err, migrationAbortedMessage)
 	}
@@ -655,7 +655,7 @@ func migrateOSSUsers(ctx context.Context, role types.Role, asrv *Server) (int, e
 		setLabels(&meta.Labels, teleport.OSSMigratedV6, types.True)
 		user.SetRoles([]string{role.GetName()})
 		user.SetMetadata(meta)
-		if err := asrv.UpsertUser(user); err != nil {
+		if err := asrv.UpsertUser(ctx, user); err != nil {
 			return migratedUsers, trace.Wrap(err, migrationAbortedMessage)
 		}
 		migratedUsers++
@@ -695,7 +695,7 @@ func migrateOSSGithubConns(ctx context.Context, role types.Role, asrv *Server) (
 		newTeams := make([]types.TeamMapping, len(teams))
 		for i, team := range teams {
 			r := services.NewOSSGithubRole(team.Logins, team.KubeUsers, team.KubeGroups)
-			err := asrv.CreateRole(r)
+			err := asrv.CreateRole(ctx, r)
 			if err != nil {
 				return migratedConns, trace.Wrap(err)
 			}
@@ -717,9 +717,10 @@ func migrateOSSGithubConns(ctx context.Context, role types.Role, asrv *Server) (
 
 // isFirstStart returns 'true' if the auth server is starting for the 1st time
 // on this server.
-func isFirstStart(authServer *Server, cfg InitConfig) (bool, error) {
+func isFirstStart(ctx context.Context, authServer *Server, cfg InitConfig) (bool, error) {
 	// check if the CA exists?
 	_, err := authServer.GetCertAuthority(
+		ctx,
 		types.CertAuthID{
 			DomainName: cfg.ClusterName.GetClusterName(),
 			Type:       types.HostCA,
@@ -780,8 +781,8 @@ func checkResourceConsistency(keyStore keystore.KeyStore, clusterName string, re
 }
 
 // GenerateIdentity generates identity for the auth server
-func GenerateIdentity(a *Server, id IdentityID, additionalPrincipals, dnsNames []string) (*Identity, error) {
-	keys, err := a.GenerateServerKeys(GenerateServerKeysRequest{
+func GenerateIdentity(ctx context.Context, a *Server, id IdentityID, additionalPrincipals, dnsNames []string) (*Identity, error) {
+	keys, err := a.GenerateServerKeys(ctx, GenerateServerKeysRequest{
 		HostID:               id.HostUUID,
 		NodeName:             id.NodeName,
 		Roles:                types.SystemRoles{id.Role},
@@ -1132,11 +1133,11 @@ func ReadLocalIdentity(dataDir string, id IdentityID) (*Identity, error) {
 // where the presence of remote cluster was identified only by presence
 // of host certificate authority with cluster name not equal local cluster name
 func migrateRemoteClusters(ctx context.Context, asrv *Server) error {
-	clusterName, err := asrv.GetClusterName()
+	clusterName, err := asrv.GetClusterName(ctx)
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	certAuthorities, err := asrv.GetCertAuthorities(types.HostCA, false)
+	certAuthorities, err := asrv.GetCertAuthorities(ctx, types.HostCA, false)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -1148,7 +1149,7 @@ func migrateRemoteClusters(ctx context.Context, asrv *Server) error {
 			continue
 		}
 		// remote cluster already exists
-		_, err = asrv.GetRemoteCluster(certAuthority.GetName())
+		_, err = asrv.GetRemoteCluster(ctx, certAuthority.GetName())
 		if err == nil {
 			log.Debugf("Migrations: remote cluster already exists for cert authority %q.", certAuthority.GetName())
 			continue
@@ -1169,7 +1170,7 @@ func migrateRemoteClusters(ctx context.Context, asrv *Server) error {
 		if err != nil {
 			return trace.Wrap(err)
 		}
-		err = asrv.CreateRemoteCluster(remoteCluster)
+		err = asrv.CreateRemoteCluster(ctx, remoteCluster)
 		if err != nil {
 			if !trace.IsAlreadyExists(err) {
 				return trace.Wrap(err)
@@ -1210,7 +1211,7 @@ func migrateRoleOptions(ctx context.Context, asrv *Server) error {
 // DELETE IN: 7.0.0
 // migrateMFADevices migrates registered MFA devices to the new storage format.
 func migrateMFADevices(ctx context.Context, asrv *Server) error {
-	users, err := asrv.GetUsers(true)
+	users, err := asrv.GetUsers(ctx, true)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -1264,7 +1265,7 @@ func migrateMFADevices(ctx context.Context, asrv *Server) error {
 
 		log.Debugf("Migrating MFA devices in LocalAuth for user %q", user.GetName())
 		user.SetLocalAuth(la)
-		if err := asrv.UpsertUser(user); err != nil {
+		if err := asrv.UpsertUser(ctx, user); err != nil {
 			return trace.Wrap(err)
 		}
 	}
@@ -1278,7 +1279,7 @@ func migrateMFADevices(ctx context.Context, asrv *Server) error {
 func migrateCertAuthorities(ctx context.Context, asrv *Server) error {
 	var errors []error
 	for _, caType := range []types.CertAuthType{types.HostCA, types.UserCA, types.JWTSigner} {
-		cas, err := asrv.GetCertAuthorities(caType, true)
+		cas, err := asrv.GetCertAuthorities(ctx, caType, true)
 		if err != nil {
 			errors = append(errors, trace.Wrap(err, "fetching %v CAs", caType))
 			continue
@@ -1321,7 +1322,7 @@ func migrateCertAuthority(ctx context.Context, asrv *Server, ca types.CertAuthor
 	if err := services.ValidateCertAuthority(ca); err != nil {
 		return trace.Wrap(err, "the migrated CA is invalid: %v", err)
 	}
-	if err := asrv.UpsertCertAuthority(ca); err != nil {
+	if err := asrv.UpsertCertAuthority(ctx, ca); err != nil {
 		return trace.Wrap(err, "failed storing the migrated CA: %v", err)
 	}
 	log.Infof("Successfully migrated %v to 7.0 storage format.", ca)
@@ -1332,7 +1333,7 @@ func migrateCertAuthority(ctx context.Context, asrv *Server, ca types.CertAuthor
 // migrateClusterID moves the cluster ID information
 // from ClusterConfig to ClusterName.
 func migrateClusterID(ctx context.Context, asrv *Server) error {
-	clusterConfig, err := asrv.ClusterConfiguration.GetClusterConfig()
+	clusterConfig, err := asrv.ClusterConfiguration.GetClusterConfig(ctx)
 	if err != nil {
 		if trace.IsNotFound(err) {
 			return nil
@@ -1340,7 +1341,7 @@ func migrateClusterID(ctx context.Context, asrv *Server) error {
 		return trace.Wrap(err)
 	}
 
-	clusterName, err := asrv.ClusterConfiguration.GetClusterName()
+	clusterName, err := asrv.ClusterConfiguration.GetClusterName(ctx)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -1351,7 +1352,7 @@ func migrateClusterID(ctx context.Context, asrv *Server) error {
 	log.Infof("Migrating cluster ID %q from legacy ClusterConfig to ClusterName.", clusterConfig.GetLegacyClusterID())
 
 	clusterName.SetClusterID(clusterConfig.GetLegacyClusterID())
-	if err := asrv.ClusterConfiguration.UpsertClusterName(clusterName); err != nil {
+	if err := asrv.ClusterConfiguration.UpsertClusterName(ctx, clusterName); err != nil {
 		return trace.Wrap(err)
 	}
 	return nil

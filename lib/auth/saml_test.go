@@ -67,12 +67,12 @@ func TestCreateSAMLUser(t *testing.T) {
 	require.NoError(t, err)
 
 	// Within that 1 minute period the user should still exist.
-	_, err = a.GetUser("foo@example.com", false)
+	_, err = a.GetUser(context.TODO(), "foo@example.com", false)
 	require.NoError(t, err)
 
 	// Advance time 2 minutes, the user should be gone.
 	c.Advance(2 * time.Minute)
-	_, err = a.GetUser("foo@example.com", false)
+	_, err = a.GetUser(context.TODO(), "foo@example.com", false)
 	require.Error(t, err)
 }
 

@@ -190,35 +190,35 @@ func newUser(name string, roles []string) types.User {
 
 func (s *ServicesTestSuite) UsersCRUD(c *check.C) {
 	ctx := context.Background()
-	u, err := s.WebS.GetUsers(false)
+	u, err := s.WebS.GetUsers(ctx, false)
 	c.Assert(err, check.IsNil)
 	c.Assert(len(u), check.Equals, 0)
 
-	c.Assert(s.WebS.UpsertPasswordHash("user1", []byte("hash")), check.IsNil)
-	c.Assert(s.WebS.UpsertPasswordHash("user2", []byte("hash2")), check.IsNil)
+	c.Assert(s.WebS.UpsertPasswordHash(ctx, "user1", []byte("hash")), check.IsNil)
+	c.Assert(s.WebS.UpsertPasswordHash(ctx, "user2", []byte("hash2")), check.IsNil)
 
-	u, err = s.WebS.GetUsers(false)
+	u, err = s.WebS.GetUsers(ctx, false)
 	c.Assert(err, check.IsNil)
 	userSlicesEqual(c, u, []types.User{newUser("user1", nil), newUser("user2", nil)})
 
-	out, err := s.WebS.GetUser("user1", false)
+	out, err := s.WebS.GetUser(ctx, "user1", false)
 	c.Assert(err, check.IsNil)
 	usersEqual(c, out, u[0])
 
 	user := newUser("user1", []string{"admin", "user"})
-	c.Assert(s.WebS.UpsertUser(user), check.IsNil)
+	c.Assert(s.WebS.UpsertUser(ctx, user), check.IsNil)
 
-	out, err = s.WebS.GetUser("user1", false)
+	out, err = s.WebS.GetUser(ctx, "user1", false)
 	c.Assert(err, check.IsNil)
 	usersEqual(c, out, user)
 
-	out, err = s.WebS.GetUser("user1", false)
+	out, err = s.WebS.GetUser(ctx, "user1", false)
 	c.Assert(err, check.IsNil)
 	usersEqual(c, out, user)
 
 	c.Assert(s.WebS.DeleteUser(ctx, "user1"), check.IsNil)
 
-	u, err = s.WebS.GetUsers(false)
+	u, err = s.WebS.GetUsers(ctx, false)
 	c.Assert(err, check.IsNil)
 	userSlicesEqual(c, u, []types.User{newUser("user2", nil)})
 
@@ -226,14 +226,15 @@ func (s *ServicesTestSuite) UsersCRUD(c *check.C) {
 	fixtures.ExpectNotFound(c, err)
 
 	// bad username
-	err = s.WebS.UpsertUser(newUser("", nil))
+	err = s.WebS.UpsertUser(ctx, newUser("", nil))
 	fixtures.ExpectBadParameter(c, err)
 }
 
 func (s *ServicesTestSuite) UsersExpiry(c *check.C) {
+	ctx := context.Background()
 	expiresAt := s.Clock.Now().Add(1 * time.Minute)
 
-	err := s.WebS.UpsertUser(&types.UserV2{
+	err := s.WebS.UpsertUser(ctx, &types.UserV2{
 		Kind:    types.KindUser,
 		Version: types.V2,
 		Metadata: types.Metadata{
@@ -246,35 +247,36 @@ func (s *ServicesTestSuite) UsersExpiry(c *check.C) {
 	c.Assert(err, check.IsNil)
 
 	// Make sure the user exists.
-	u, err := s.WebS.GetUser("foo", false)
+	u, err := s.WebS.GetUser(ctx, "foo", false)
 	c.Assert(err, check.IsNil)
 	c.Assert(u.GetName(), check.Equals, "foo")
 
 	s.Clock.Advance(2 * time.Minute)
 
 	// Make sure the user is now gone.
-	_, err = s.WebS.GetUser("foo", false)
+	_, err = s.WebS.GetUser(ctx, "foo", false)
 	c.Assert(err, check.NotNil)
 }
 
 func (s *ServicesTestSuite) LoginAttempts(c *check.C) {
+	ctx := context.Background()
 	user := newUser("user1", []string{"admin", "user"})
-	c.Assert(s.WebS.UpsertUser(user), check.IsNil)
+	c.Assert(s.WebS.UpsertUser(ctx, user), check.IsNil)
 
-	attempts, err := s.WebS.GetUserLoginAttempts(user.GetName())
+	attempts, err := s.WebS.GetUserLoginAttempts(ctx, user.GetName())
 	c.Assert(err, check.IsNil)
 	c.Assert(len(attempts), check.Equals, 0)
 
 	clock := clockwork.NewFakeClock()
 	attempt1 := services.LoginAttempt{Time: clock.Now().UTC(), Success: false}
-	err = s.WebS.AddUserLoginAttempt(user.GetName(), attempt1, defaults.AttemptTTL)
+	err = s.WebS.AddUserLoginAttempt(ctx, user.GetName(), attempt1, defaults.AttemptTTL)
 	c.Assert(err, check.IsNil)
 
 	attempt2 := services.LoginAttempt{Time: clock.Now().UTC(), Success: false}
-	err = s.WebS.AddUserLoginAttempt(user.GetName(), attempt2, defaults.AttemptTTL)
+	err = s.WebS.AddUserLoginAttempt(ctx, user.GetName(), attempt2, defaults.AttemptTTL)
 	c.Assert(err, check.IsNil)
 
-	attempts, err = s.WebS.GetUserLoginAttempts(user.GetName())
+	attempts, err = s.WebS.GetUserLoginAttempts(ctx, user.GetName())
 	c.Assert(err, check.IsNil)
 	c.Assert(attempts, check.DeepEquals, []services.LoginAttempt{attempt1, attempt2})
 	c.Assert(services.LastFailed(3, attempts), check.Equals, false)
@@ -282,15 +284,16 @@ func (s *ServicesTestSuite) LoginAttempts(c *check.C) {
 }
 
 func (s *ServicesTestSuite) CertAuthCRUD(c *check.C) {
+	ctx := context.Background()
 	ca := NewTestCA(types.UserCA, "example.com")
-	c.Assert(s.CAS.UpsertCertAuthority(ca), check.IsNil)
+	c.Assert(s.CAS.UpsertCertAuthority(ctx, ca), check.IsNil)
 
-	out, err := s.CAS.GetCertAuthority(ca.GetID(), true)
+	out, err := s.CAS.GetCertAuthority(ctx, ca.GetID(), true)
 	c.Assert(err, check.IsNil)
 	ca.SetResourceID(out.GetResourceID())
 	fixtures.DeepCompare(c, out, ca)
 
-	cas, err := s.CAS.GetCertAuthorities(types.UserCA, false)
+	cas, err := s.CAS.GetCertAuthorities(ctx, types.UserCA, false)
 	c.Assert(err, check.IsNil)
 	ca2 := ca.Clone().(*types.CertAuthorityV2)
 	ca2.Spec.ActiveKeys.SSH[0].PrivateKey = nil
@@ -301,20 +304,20 @@ func (s *ServicesTestSuite) CertAuthCRUD(c *check.C) {
 	ca2.Spec.JWTKeyPairs[0].PrivateKey = nil
 	fixtures.DeepCompare(c, cas[0], ca2)
 
-	cas, err = s.CAS.GetCertAuthorities(types.UserCA, true)
+	cas, err = s.CAS.GetCertAuthorities(ctx, types.UserCA, true)
 	c.Assert(err, check.IsNil)
 	fixtures.DeepCompare(c, cas[0], ca)
 
-	cas, err = s.CAS.GetCertAuthorities(types.UserCA, true)
+	cas, err = s.CAS.GetCertAuthorities(ctx, types.UserCA, true)
 	c.Assert(err, check.IsNil)
 	fixtures.DeepCompare(c, cas[0], ca)
 
-	err = s.CAS.DeleteCertAuthority(*ca.ID())
+	err = s.CAS.DeleteCertAuthority(ctx, *ca.ID())
 	c.Assert(err, check.IsNil)
 
 	// test compare and swap
 	ca = NewTestCA(types.UserCA, "example.com")
-	c.Assert(s.CAS.CreateCertAuthority(ca), check.IsNil)
+	c.Assert(s.CAS.CreateCertAuthority(ctx, ca), check.IsNil)
 
 	clock := clockwork.NewFakeClock()
 	newCA := *ca
@@ -326,10 +329,10 @@ func (s *ServicesTestSuite) CertAuthCRUD(c *check.C) {
 	}
 	newCA.SetRotation(rotation)
 
-	err = s.CAS.CompareAndSwapCertAuthority(&newCA, ca)
+	err = s.CAS.CompareAndSwapCertAuthority(ctx, &newCA, ca)
 	c.Assert(err, check.IsNil)
 
-	out, err = s.CAS.GetCertAuthority(ca.GetID(), true)
+	out, err = s.CAS.GetCertAuthority(ctx, ca.GetID(), true)
 	c.Assert(err, check.IsNil)
 	newCA.SetResourceID(out.GetResourceID())
 	fixtures.DeepCompare(c, &newCA, out)
@@ -381,35 +384,35 @@ func (s *ServicesTestSuite) ServerCRUD(c *check.C) {
 	c.Assert(out, check.HasLen, 0)
 
 	// Proxy service.
-	out, err = s.PresenceS.GetProxies()
+	out, err = s.PresenceS.GetProxies(ctx)
 	c.Assert(err, check.IsNil)
 	c.Assert(len(out), check.Equals, 0)
 
 	proxy := NewServer(types.KindProxy, "proxy1", "127.0.0.1:2023", apidefaults.Namespace)
-	c.Assert(s.PresenceS.UpsertProxy(proxy), check.IsNil)
+	c.Assert(s.PresenceS.UpsertProxy(ctx, proxy), check.IsNil)
 
-	out, err = s.PresenceS.GetProxies()
+	out, err = s.PresenceS.GetProxies(ctx)
 	c.Assert(err, check.IsNil)
 	c.Assert(out, check.HasLen, 1)
 	proxy.SetResourceID(out[0].GetResourceID())
 	c.Assert(out, check.DeepEquals, []types.Server{proxy})
 
-	err = s.PresenceS.DeleteProxy(proxy.GetName())
+	err = s.PresenceS.DeleteProxy(ctx, proxy.GetName())
 	c.Assert(err, check.IsNil)
 
-	out, err = s.PresenceS.GetProxies()
+	out, err = s.PresenceS.GetProxies(ctx)
 	c.Assert(err, check.IsNil)
 	c.Assert(out, check.HasLen, 0)
 
 	// Auth service.
-	out, err = s.PresenceS.GetAuthServers()
+	out, err = s.PresenceS.GetAuthServers(ctx)
 	c.Assert(err, check.IsNil)
 	c.Assert(len(out), check.Equals, 0)
 
 	auth := NewServer(types.KindAuthServer, "auth1", "127.0.0.1:2025", apidefaults.Namespace)
-	c.Assert(s.PresenceS.UpsertAuthServer(auth), check.IsNil)
+	c.Assert(s.PresenceS.UpsertAuthServer(ctx, auth), check.IsNil)
 
-	out, err = s.PresenceS.GetAuthServers()
+	out, err = s.PresenceS.GetAuthServers(ctx)
 	c.Assert(err, check.IsNil)
 	c.Assert(out, check.HasLen, 1)
 	auth.SetResourceID(out[0].GetResourceID())
@@ -514,51 +517,53 @@ func newReverseTunnel(clusterName string, dialAddrs []string) *types.ReverseTunn
 }
 
 func (s *ServicesTestSuite) ReverseTunnelsCRUD(c *check.C) {
-	out, err := s.PresenceS.GetReverseTunnels()
+	ctx := context.Background()
+	out, err := s.PresenceS.GetReverseTunnels(ctx)
 	c.Assert(err, check.IsNil)
 	c.Assert(len(out), check.Equals, 0)
 
 	tunnel := newReverseTunnel("example.com", []string{"example.com:2023"})
-	c.Assert(s.PresenceS.UpsertReverseTunnel(tunnel), check.IsNil)
+	c.Assert(s.PresenceS.UpsertReverseTunnel(ctx, tunnel), check.IsNil)
 
-	out, err = s.PresenceS.GetReverseTunnels()
+	out, err = s.PresenceS.GetReverseTunnels(ctx)
 	c.Assert(err, check.IsNil)
 	c.Assert(out, check.HasLen, 1)
 	tunnel.SetResourceID(out[0].GetResourceID())
 	fixtures.DeepCompare(c, out, []types.ReverseTunnel{tunnel})
 
-	err = s.PresenceS.DeleteReverseTunnel(tunnel.Spec.ClusterName)
+	err = s.PresenceS.DeleteReverseTunnel(ctx, tunnel.Spec.ClusterName)
 	c.Assert(err, check.IsNil)
 
-	out, err = s.PresenceS.GetReverseTunnels()
+	out, err = s.PresenceS.GetReverseTunnels(ctx)
 	c.Assert(err, check.IsNil)
 	c.Assert(len(out), check.Equals, 0)
 
-	err = s.PresenceS.UpsertReverseTunnel(newReverseTunnel("", []string{"127.0.0.1:1234"}))
+	err = s.PresenceS.UpsertReverseTunnel(ctx, newReverseTunnel("", []string{"127.0.0.1:1234"}))
 	fixtures.ExpectBadParameter(c, err)
 
-	err = s.PresenceS.UpsertReverseTunnel(newReverseTunnel("example.com", []string{""}))
+	err = s.PresenceS.UpsertReverseTunnel(ctx, newReverseTunnel("example.com", []string{""}))
 	fixtures.ExpectBadParameter(c, err)
 
-	err = s.PresenceS.UpsertReverseTunnel(newReverseTunnel("example.com", []string{}))
+	err = s.PresenceS.UpsertReverseTunnel(ctx, newReverseTunnel("example.com", []string{}))
 	fixtures.ExpectBadParameter(c, err)
 }
 
 func (s *ServicesTestSuite) PasswordHashCRUD(c *check.C) {
-	_, err := s.WebS.GetPasswordHash("user1")
+	ctx := context.Background()
+	_, err := s.WebS.GetPasswordHash(ctx, "user1")
 	c.Assert(trace.IsNotFound(err), check.Equals, true, check.Commentf("%#v", err))
 
-	err = s.WebS.UpsertPasswordHash("user1", []byte("hello123"))
+	err = s.WebS.UpsertPasswordHash(ctx, "user1", []byte("hello123"))
 	c.Assert(err, check.IsNil)
 
-	hash, err := s.WebS.GetPasswordHash("user1")
+	hash, err := s.WebS.GetPasswordHash(ctx, "user1")
 	c.Assert(err, check.IsNil)
 	c.Assert(hash, check.DeepEquals, []byte("hello123"))
 
-	err = s.WebS.UpsertPasswordHash("user1", []byte("hello321"))
+	err = s.WebS.UpsertPasswordHash(ctx, "user1", []byte("hello321"))
 	c.Assert(err, check.IsNil)
 
-	hash, err = s.WebS.GetPasswordHash("user1")
+	hash, err = s.WebS.GetPasswordHash(ctx, "user1")
 	c.Assert(err, check.IsNil)
 	c.Assert(hash, check.DeepEquals, []byte("hello321"))
 }
@@ -672,7 +677,7 @@ func (s *ServicesTestSuite) TokenCRUD(c *check.C) {
 	c.Assert(err, check.IsNil)
 	c.Assert(tokens, check.HasLen, 2)
 
-	err = s.ProvisioningS.DeleteAllTokens()
+	err = s.ProvisioningS.DeleteAllTokens(ctx)
 	c.Assert(err, check.IsNil)
 
 	tokens, err = s.ProvisioningS.GetTokens(ctx)
@@ -741,7 +746,8 @@ func (s *ServicesTestSuite) RolesCRUD(c *check.C) {
 }
 
 func (s *ServicesTestSuite) NamespacesCRUD(c *check.C) {
-	out, err := s.PresenceS.GetNamespaces()
+	ctx := context.Background()
+	out, err := s.PresenceS.GetNamespaces(ctx)
 	c.Assert(err, check.IsNil)
 	c.Assert(len(out), check.Equals, 0)
 
@@ -753,16 +759,16 @@ func (s *ServicesTestSuite) NamespacesCRUD(c *check.C) {
 			Namespace: apidefaults.Namespace,
 		},
 	}
-	err = s.PresenceS.UpsertNamespace(ns)
+	err = s.PresenceS.UpsertNamespace(ctx, ns)
 	c.Assert(err, check.IsNil)
-	nsout, err := s.PresenceS.GetNamespace(ns.Metadata.Name)
+	nsout, err := s.PresenceS.GetNamespace(ctx, ns.Metadata.Name)
 	c.Assert(err, check.IsNil)
 	c.Assert(nsout, check.DeepEquals, &ns)
 
-	err = s.PresenceS.DeleteNamespace(ns.Metadata.Name)
+	err = s.PresenceS.DeleteNamespace(ctx, ns.Metadata.Name)
 	c.Assert(err, check.IsNil)
 
-	_, err = s.PresenceS.GetNamespace(ns.Metadata.Name)
+	_, err = s.PresenceS.GetNamespace(ctx, ns.Metadata.Name)
 	fixtures.ExpectNotFound(c, err)
 }
 
@@ -770,24 +776,25 @@ func (s *ServicesTestSuite) U2FCRUD(c *check.C) {
 	token := "tok1"
 	appID := "https://localhost"
 	user1 := "user1"
+	ctx := context.Background()
 
 	challenge, err := u2f.NewChallenge(appID, []string{appID})
 	c.Assert(err, check.IsNil)
 
-	err = s.WebS.UpsertU2FRegisterChallenge(token, challenge)
+	err = s.WebS.UpsertU2FRegisterChallenge(ctx, token, challenge)
 	c.Assert(err, check.IsNil)
 
-	challengeOut, err := s.WebS.GetU2FRegisterChallenge(token)
+	challengeOut, err := s.WebS.GetU2FRegisterChallenge(ctx, token)
 	c.Assert(err, check.IsNil)
 	c.Assert(challenge.Challenge, check.DeepEquals, challengeOut.Challenge)
 	c.Assert(challenge.Timestamp.Unix(), check.Equals, challengeOut.Timestamp.Unix())
 	c.Assert(challenge.AppID, check.Equals, challengeOut.AppID)
 	c.Assert(challenge.TrustedFacets, check.DeepEquals, challengeOut.TrustedFacets)
 
-	err = s.WebS.UpsertU2FSignChallenge(user1, challenge)
+	err = s.WebS.UpsertU2FSignChallenge(ctx, user1, challenge)
 	c.Assert(err, check.IsNil)
 
-	challengeOut, err = s.WebS.GetU2FSignChallenge(user1)
+	challengeOut, err = s.WebS.GetU2FSignChallenge(ctx, user1)
 	c.Assert(err, check.IsNil)
 	c.Assert(challenge.Challenge, check.DeepEquals, challengeOut.Challenge)
 	c.Assert(challenge.Timestamp.Unix(), check.Equals, challengeOut.Timestamp.Unix())
@@ -809,7 +816,6 @@ func (s *ServicesTestSuite) U2FCRUD(c *check.C) {
 	}
 	dev, err := u2f.NewDevice("u2f", &registration, s.Clock.Now())
 	c.Assert(err, check.IsNil)
-	ctx := context.Background()
 	err = s.WebS.UpsertMFADevice(ctx, user1, dev)
 	c.Assert(err, check.IsNil)
 
@@ -895,8 +901,9 @@ func (s *ServicesTestSuite) SAMLCRUD(c *check.C) {
 }
 
 func (s *ServicesTestSuite) TunnelConnectionsCRUD(c *check.C) {
+	ctx := context.Background()
 	clusterName := "example.com"
-	out, err := s.PresenceS.GetTunnelConnections(clusterName)
+	out, err := s.PresenceS.GetTunnelConnections(ctx, clusterName)
 	c.Assert(err, check.IsNil)
 	c.Assert(len(out), check.Equals, 0)
 
@@ -908,16 +915,16 @@ func (s *ServicesTestSuite) TunnelConnectionsCRUD(c *check.C) {
 	})
 	c.Assert(err, check.IsNil)
 
-	err = s.PresenceS.UpsertTunnelConnection(conn)
+	err = s.PresenceS.UpsertTunnelConnection(ctx, conn)
 	c.Assert(err, check.IsNil)
 
-	out, err = s.PresenceS.GetTunnelConnections(clusterName)
+	out, err = s.PresenceS.GetTunnelConnections(ctx, clusterName)
 	c.Assert(err, check.IsNil)
 	c.Assert(len(out), check.Equals, 1)
 	conn.SetResourceID(out[0].GetResourceID())
 	fixtures.DeepCompare(c, out[0], conn)
 
-	out, err = s.PresenceS.GetAllTunnelConnections()
+	out, err = s.PresenceS.GetAllTunnelConnections(ctx)
 	c.Assert(err, check.IsNil)
 	c.Assert(len(out), check.Equals, 1)
 	fixtures.DeepCompare(c, out[0], conn)
@@ -925,39 +932,39 @@ func (s *ServicesTestSuite) TunnelConnectionsCRUD(c *check.C) {
 	dt = dt.Add(time.Hour)
 	conn.SetLastHeartbeat(dt)
 
-	err = s.PresenceS.UpsertTunnelConnection(conn)
+	err = s.PresenceS.UpsertTunnelConnection(ctx, conn)
 	c.Assert(err, check.IsNil)
 
-	out, err = s.PresenceS.GetTunnelConnections(clusterName)
+	out, err = s.PresenceS.GetTunnelConnections(ctx, clusterName)
 	c.Assert(err, check.IsNil)
 	c.Assert(len(out), check.Equals, 1)
 	conn.SetResourceID(out[0].GetResourceID())
 	fixtures.DeepCompare(c, out[0], conn)
 
-	err = s.PresenceS.DeleteAllTunnelConnections()
+	err = s.PresenceS.DeleteAllTunnelConnections(ctx)
 	c.Assert(err, check.IsNil)
 
-	out, err = s.PresenceS.GetTunnelConnections(clusterName)
+	out, err = s.PresenceS.GetTunnelConnections(ctx, clusterName)
 	c.Assert(err, check.IsNil)
 	c.Assert(len(out), check.Equals, 0)
 
-	err = s.PresenceS.DeleteAllTunnelConnections()
+	err = s.PresenceS.DeleteAllTunnelConnections(ctx)
 	c.Assert(err, check.IsNil)
 
 	// test delete individual connection
-	err = s.PresenceS.UpsertTunnelConnection(conn)
+	err = s.PresenceS.UpsertTunnelConnection(ctx, conn)
 	c.Assert(err, check.IsNil)
 
-	out, err = s.PresenceS.GetTunnelConnections(clusterName)
+	out, err = s.PresenceS.GetTunnelConnections(ctx, clusterName)
 	c.Assert(err, check.IsNil)
 	c.Assert(len(out), check.Equals, 1)
 	conn.SetResourceID(out[0].GetResourceID())
 	fixtures.DeepCompare(c, out[0], conn)
 
-	err = s.PresenceS.DeleteTunnelConnection(clusterName, conn.GetName())
+	err = s.PresenceS.DeleteTunnelConnection(ctx, clusterName, conn.GetName())
 	c.Assert(err, check.IsNil)
 
-	out, err = s.PresenceS.GetTunnelConnections(clusterName)
+	out, err = s.PresenceS.GetTunnelConnections(ctx, clusterName)
 	c.Assert(err, check.IsNil)
 	c.Assert(len(out), check.Equals, 0)
 }
@@ -1019,8 +1026,9 @@ func (s *ServicesTestSuite) GithubConnectorCRUD(c *check.C) {
 }
 
 func (s *ServicesTestSuite) RemoteClustersCRUD(c *check.C) {
+	ctx := context.Background()
 	clusterName := "example.com"
-	out, err := s.PresenceS.GetRemoteClusters()
+	out, err := s.PresenceS.GetRemoteClusters(ctx)
 	c.Assert(err, check.IsNil)
 	c.Assert(len(out), check.Equals, 0)
 
@@ -1029,38 +1037,38 @@ func (s *ServicesTestSuite) RemoteClustersCRUD(c *check.C) {
 
 	rc.SetConnectionStatus(teleport.RemoteClusterStatusOffline)
 
-	err = s.PresenceS.CreateRemoteCluster(rc)
+	err = s.PresenceS.CreateRemoteCluster(ctx, rc)
 	c.Assert(err, check.IsNil)
 
-	err = s.PresenceS.CreateRemoteCluster(rc)
+	err = s.PresenceS.CreateRemoteCluster(ctx, rc)
 	fixtures.ExpectAlreadyExists(c, err)
 
-	out, err = s.PresenceS.GetRemoteClusters()
+	out, err = s.PresenceS.GetRemoteClusters(ctx)
 	c.Assert(err, check.IsNil)
 	c.Assert(len(out), check.Equals, 1)
 	rc.SetResourceID(out[0].GetResourceID())
 	fixtures.DeepCompare(c, out[0], rc)
 
-	err = s.PresenceS.DeleteAllRemoteClusters()
+	err = s.PresenceS.DeleteAllRemoteClusters(ctx)
 	c.Assert(err, check.IsNil)
 
-	out, err = s.PresenceS.GetRemoteClusters()
+	out, err = s.PresenceS.GetRemoteClusters(ctx)
 	c.Assert(err, check.IsNil)
 	c.Assert(len(out), check.Equals, 0)
 
 	// test delete individual connection
-	err = s.PresenceS.CreateRemoteCluster(rc)
+	err = s.PresenceS.CreateRemoteCluster(ctx, rc)
 	c.Assert(err, check.IsNil)
 
-	out, err = s.PresenceS.GetRemoteClusters()
+	out, err = s.PresenceS.GetRemoteClusters(ctx)
 	c.Assert(err, check.IsNil)
 	c.Assert(len(out), check.Equals, 1)
 	fixtures.DeepCompare(c, out[0], rc)
 
-	err = s.PresenceS.DeleteRemoteCluster(clusterName)
+	err = s.PresenceS.DeleteRemoteCluster(ctx, clusterName)
 	c.Assert(err, check.IsNil)
 
-	err = s.PresenceS.DeleteRemoteCluster(clusterName)
+	err = s.PresenceS.DeleteRemoteCluster(ctx, clusterName)
 	fixtures.ExpectNotFound(c, err)
 }
 
@@ -1114,19 +1122,19 @@ func (s *ServicesTestSuite) StaticTokens(c *check.C) {
 		},
 	})
 	c.Assert(err, check.IsNil)
-
-	err = s.ConfigS.SetStaticTokens(staticTokens)
+	ctx := context.Background()
+	err = s.ConfigS.SetStaticTokens(ctx, staticTokens)
 	c.Assert(err, check.IsNil)
 
-	out, err := s.ConfigS.GetStaticTokens()
+	out, err := s.ConfigS.GetStaticTokens(ctx)
 	c.Assert(err, check.IsNil)
 	staticTokens.SetResourceID(out.GetResourceID())
 	fixtures.DeepCompare(c, staticTokens, out)
 
-	err = s.ConfigS.DeleteStaticTokens()
+	err = s.ConfigS.DeleteStaticTokens(ctx)
 	c.Assert(err, check.IsNil)
 
-	_, err = s.ConfigS.GetStaticTokens()
+	_, err = s.ConfigS.GetStaticTokens(ctx)
 	fixtures.ExpectNotFound(c, err)
 }
 
@@ -1162,7 +1170,7 @@ func CollectOptions(opts ...Option) Options {
 func (s *ServicesTestSuite) ClusterConfig(c *check.C, opts ...Option) {
 	ctx := context.Background()
 
-	clusterName, err := s.ConfigS.GetClusterName()
+	clusterName, err := s.ConfigS.GetClusterName(ctx)
 	c.Assert(err, check.IsNil)
 	clusterID := clusterName.GetClusterID()
 
@@ -1180,10 +1188,10 @@ func (s *ServicesTestSuite) ClusterConfig(c *check.C, opts ...Option) {
 
 	config, err := types.NewClusterConfig(types.ClusterConfigSpecV3{})
 	c.Assert(err, check.IsNil)
-	err = s.ConfigS.SetClusterConfig(config)
+	err = s.ConfigS.SetClusterConfig(ctx, config)
 	c.Assert(err, check.IsNil)
 
-	gotConfig, err := s.ConfigS.GetClusterConfig()
+	gotConfig, err := s.ConfigS.GetClusterConfig(ctx)
 	c.Assert(err, check.IsNil)
 	config.SetResourceID(gotConfig.GetResourceID())
 	config.SetLegacyClusterID(clusterID)
@@ -1196,28 +1204,29 @@ func (s *ServicesTestSuite) ClusterConfig(c *check.C, opts ...Option) {
 
 // ClusterName tests cluster name.
 func (s *ServicesTestSuite) ClusterName(c *check.C, opts ...Option) {
+	ctx := context.Background()
 	clusterName, err := services.NewClusterNameWithRandomID(types.ClusterNameSpecV2{
 		ClusterName: "example.com",
 	})
 	c.Assert(err, check.IsNil)
-	err = s.ConfigS.SetClusterName(clusterName)
+	err = s.ConfigS.SetClusterName(ctx, clusterName)
 	c.Assert(err, check.IsNil)
 
-	gotName, err := s.ConfigS.GetClusterName()
+	gotName, err := s.ConfigS.GetClusterName(ctx)
 	c.Assert(err, check.IsNil)
 	clusterName.SetResourceID(gotName.GetResourceID())
 	fixtures.DeepCompare(c, clusterName, gotName)
 
-	err = s.ConfigS.DeleteClusterName()
+	err = s.ConfigS.DeleteClusterName(ctx)
 	c.Assert(err, check.IsNil)
 
-	_, err = s.ConfigS.GetClusterName()
+	_, err = s.ConfigS.GetClusterName(ctx)
 	fixtures.ExpectNotFound(c, err)
 
-	err = s.ConfigS.UpsertClusterName(clusterName)
+	err = s.ConfigS.UpsertClusterName(ctx, clusterName)
 	c.Assert(err, check.IsNil)
 
-	gotName, err = s.ConfigS.GetClusterName()
+	gotName, err = s.ConfigS.GetClusterName(ctx)
 	c.Assert(err, check.IsNil)
 	clusterName.SetResourceID(gotName.GetResourceID())
 	fixtures.DeepCompare(c, clusterName, gotName)
@@ -1460,12 +1469,12 @@ func (s *ServicesTestSuite) Events(c *check.C) {
 			},
 			crud: func(context.Context) types.Resource {
 				ca := NewTestCA(types.UserCA, "example.com")
-				c.Assert(s.CAS.UpsertCertAuthority(ca), check.IsNil)
+				c.Assert(s.CAS.UpsertCertAuthority(ctx, ca), check.IsNil)
 
-				out, err := s.CAS.GetCertAuthority(*ca.ID(), true)
+				out, err := s.CAS.GetCertAuthority(ctx, *ca.ID(), true)
 				c.Assert(err, check.IsNil)
 
-				c.Assert(s.CAS.DeleteCertAuthority(*ca.ID()), check.IsNil)
+				c.Assert(s.CAS.DeleteCertAuthority(ctx, *ca.ID()), check.IsNil)
 				return out
 			},
 		},
@@ -1481,12 +1490,12 @@ func (s *ServicesTestSuite) Events(c *check.C) {
 			},
 			crud: func(context.Context) types.Resource {
 				ca := NewTestCA(types.UserCA, "example.com")
-				c.Assert(s.CAS.UpsertCertAuthority(ca), check.IsNil)
+				c.Assert(s.CAS.UpsertCertAuthority(ctx, ca), check.IsNil)
 
-				out, err := s.CAS.GetCertAuthority(*ca.ID(), false)
+				out, err := s.CAS.GetCertAuthority(ctx, *ca.ID(), false)
 				c.Assert(err, check.IsNil)
 
-				c.Assert(s.CAS.DeleteCertAuthority(*ca.ID()), check.IsNil)
+				c.Assert(s.CAS.DeleteCertAuthority(ctx, *ca.ID()), check.IsNil)
 				return out
 			},
 		},
@@ -1528,13 +1537,13 @@ func (s *ServicesTestSuite) Events(c *check.C) {
 						Namespace: apidefaults.Namespace,
 					},
 				}
-				err := s.PresenceS.UpsertNamespace(ns)
+				err := s.PresenceS.UpsertNamespace(ctx, ns)
 				c.Assert(err, check.IsNil)
 
-				out, err := s.PresenceS.GetNamespace(ns.Metadata.Name)
+				out, err := s.PresenceS.GetNamespace(ctx, ns.Metadata.Name)
 				c.Assert(err, check.IsNil)
 
-				err = s.PresenceS.DeleteNamespace(ns.Metadata.Name)
+				err = s.PresenceS.DeleteNamespace(ctx, ns.Metadata.Name)
 				c.Assert(err, check.IsNil)
 
 				return out
@@ -1557,13 +1566,13 @@ func (s *ServicesTestSuite) Events(c *check.C) {
 				})
 				c.Assert(err, check.IsNil)
 
-				err = s.ConfigS.SetStaticTokens(staticTokens)
+				err = s.ConfigS.SetStaticTokens(ctx, staticTokens)
 				c.Assert(err, check.IsNil)
 
-				out, err := s.ConfigS.GetStaticTokens()
+				out, err := s.ConfigS.GetStaticTokens(ctx)
 				c.Assert(err, check.IsNil)
 
-				err = s.ConfigS.DeleteStaticTokens()
+				err = s.ConfigS.DeleteStaticTokens(ctx)
 				c.Assert(err, check.IsNil)
 
 				return out
@@ -1606,10 +1615,10 @@ func (s *ServicesTestSuite) Events(c *check.C) {
 			},
 			crud: func(context.Context) types.Resource {
 				user := newUser("user1", []string{"admin"})
-				err := s.Users().UpsertUser(user)
+				err := s.Users().UpsertUser(ctx, user)
 				c.Assert(err, check.IsNil)
 
-				out, err := s.Users().GetUser(user.GetName(), false)
+				out, err := s.Users().GetUser(ctx, user.GetName(), false)
 				c.Assert(err, check.IsNil)
 
 				c.Assert(s.Users().DeleteUser(ctx, user.GetName()), check.IsNil)
@@ -1644,13 +1653,13 @@ func (s *ServicesTestSuite) Events(c *check.C) {
 			crud: func(context.Context) types.Resource {
 				srv := NewServer(types.KindProxy, "srv1", "127.0.0.1:2022", apidefaults.Namespace)
 
-				err := s.PresenceS.UpsertProxy(srv)
+				err := s.PresenceS.UpsertProxy(ctx, srv)
 				c.Assert(err, check.IsNil)
 
-				out, err := s.PresenceS.GetProxies()
+				out, err := s.PresenceS.GetProxies(ctx)
 				c.Assert(err, check.IsNil)
 
-				err = s.PresenceS.DeleteAllProxies()
+				err = s.PresenceS.DeleteAllProxies(ctx)
 				c.Assert(err, check.IsNil)
 
 				return out[0]
@@ -1669,13 +1678,13 @@ func (s *ServicesTestSuite) Events(c *check.C) {
 				})
 				c.Assert(err, check.IsNil)
 
-				err = s.PresenceS.UpsertTunnelConnection(conn)
+				err = s.PresenceS.UpsertTunnelConnection(ctx, conn)
 				c.Assert(err, check.IsNil)
 
-				out, err := s.PresenceS.GetTunnelConnections("example.com")
+				out, err := s.PresenceS.GetTunnelConnections(ctx, "example.com")
 				c.Assert(err, check.IsNil)
 
-				err = s.PresenceS.DeleteAllTunnelConnections()
+				err = s.PresenceS.DeleteAllTunnelConnections(ctx)
 				c.Assert(err, check.IsNil)
 
 				return out[0]
@@ -1688,12 +1697,12 @@ func (s *ServicesTestSuite) Events(c *check.C) {
 			},
 			crud: func(context.Context) types.Resource {
 				tunnel := newReverseTunnel("example.com", []string{"example.com:2023"})
-				c.Assert(s.PresenceS.UpsertReverseTunnel(tunnel), check.IsNil)
+				c.Assert(s.PresenceS.UpsertReverseTunnel(ctx, tunnel), check.IsNil)
 
-				out, err := s.PresenceS.GetReverseTunnels()
+				out, err := s.PresenceS.GetReverseTunnels(ctx)
 				c.Assert(err, check.IsNil)
 
-				err = s.PresenceS.DeleteReverseTunnel(tunnel.Spec.ClusterName)
+				err = s.PresenceS.DeleteReverseTunnel(ctx, tunnel.Spec.ClusterName)
 				c.Assert(err, check.IsNil)
 
 				return out[0]
@@ -1708,12 +1717,12 @@ func (s *ServicesTestSuite) Events(c *check.C) {
 				rc, err := types.NewRemoteCluster("example.com")
 				rc.SetConnectionStatus(teleport.RemoteClusterStatusOffline)
 				c.Assert(err, check.IsNil)
-				c.Assert(s.PresenceS.CreateRemoteCluster(rc), check.IsNil)
+				c.Assert(s.PresenceS.CreateRemoteCluster(ctx, rc), check.IsNil)
 
-				out, err := s.PresenceS.GetRemoteClusters()
+				out, err := s.PresenceS.GetRemoteClusters(ctx)
 				c.Assert(err, check.IsNil)
 
-				err = s.PresenceS.DeleteRemoteCluster(rc.GetName())
+				err = s.PresenceS.DeleteRemoteCluster(ctx, rc.GetName())
 				c.Assert(err, check.IsNil)
 
 				return out[0]
@@ -1739,13 +1748,13 @@ func (s *ServicesTestSuite) Events(c *check.C) {
 						Namespace: apidefaults.Namespace,
 					},
 				}
-				err := s.PresenceS.UpsertNamespace(ns)
+				err := s.PresenceS.UpsertNamespace(ctx, ns)
 				c.Assert(err, check.IsNil)
 
-				out, err := s.PresenceS.GetNamespace(ns.Metadata.Name)
+				out, err := s.PresenceS.GetNamespace(ctx, ns.Metadata.Name)
 				c.Assert(err, check.IsNil)
 
-				err = s.PresenceS.DeleteNamespace(ns.Metadata.Name)
+				err = s.PresenceS.DeleteNamespace(ctx, ns.Metadata.Name)
 				c.Assert(err, check.IsNil)
 
 				return out
@@ -1769,7 +1778,7 @@ func (s *ServicesTestSuite) EventsClusterConfig(c *check.C) {
 					ClusterName: "example.com",
 				})
 				c.Assert(err, check.IsNil)
-				err = s.ConfigS.SetClusterName(clusterName)
+				err = s.ConfigS.SetClusterName(ctx, clusterName)
 				c.Assert(err, check.IsNil)
 
 				// DELETE IN 8.0.0
@@ -1791,10 +1800,10 @@ func (s *ServicesTestSuite) EventsClusterConfig(c *check.C) {
 				config, err := types.NewClusterConfig(types.ClusterConfigSpecV3{})
 				c.Assert(err, check.IsNil)
 
-				err = s.ConfigS.SetClusterConfig(config)
+				err = s.ConfigS.SetClusterConfig(ctx, config)
 				c.Assert(err, check.IsNil)
 
-				out, err := s.ConfigS.GetClusterConfig()
+				out, err := s.ConfigS.GetClusterConfig(ctx)
 				c.Assert(err, check.IsNil)
 
 				// To ensure backward compatibility the ClusterConfig resource is not
@@ -1809,7 +1818,7 @@ func (s *ServicesTestSuite) EventsClusterConfig(c *check.C) {
 				defer w.Close()
 				ExpectResource(c, w, time.Second, out)
 
-				err = s.ConfigS.DeleteClusterConfig()
+				err = s.ConfigS.DeleteClusterConfig(ctx)
 				c.Assert(err, check.IsNil)
 				return out
 			},
@@ -1819,19 +1828,19 @@ func (s *ServicesTestSuite) EventsClusterConfig(c *check.C) {
 			kind: types.WatchKind{
 				Kind: types.KindClusterName,
 			},
-			crud: func(context.Context) types.Resource {
+			crud: func(ctx context.Context) types.Resource {
 				clusterName, err := services.NewClusterNameWithRandomID(types.ClusterNameSpecV2{
 					ClusterName: "example.com",
 				})
 				c.Assert(err, check.IsNil)
 
-				err = s.ConfigS.UpsertClusterName(clusterName)
+				err = s.ConfigS.UpsertClusterName(ctx, clusterName)
 				c.Assert(err, check.IsNil)
 
-				out, err := s.ConfigS.GetClusterName()
+				out, err := s.ConfigS.GetClusterName(ctx)
 				c.Assert(err, check.IsNil)
 
-				err = s.ConfigS.DeleteClusterName()
+				err = s.ConfigS.DeleteClusterName(ctx)
 				c.Assert(err, check.IsNil)
 				return out
 			},

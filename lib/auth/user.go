@@ -47,7 +47,7 @@ func (s *Server) CreateUser(ctx context.Context, user types.User) error {
 	// TODO: ctx is being swallowed here because the current implementation of
 	// s.Identity.CreateUser is an older implementation that does not curently
 	// accept a context.
-	if err := s.Identity.CreateUser(user); err != nil {
+	if err := s.Identity.CreateUser(ctx, user); err != nil {
 		return trace.Wrap(err)
 	}
 
@@ -110,8 +110,8 @@ func (s *Server) UpdateUser(ctx context.Context, user types.User) error {
 }
 
 // UpsertUser updates a user.
-func (s *Server) UpsertUser(user types.User) error {
-	err := s.Identity.UpsertUser(user)
+func (s *Server) UpsertUser(ctx context.Context, user types.User) error {
+	err := s.Identity.UpsertUser(ctx, user)
 	if err != nil {
 		return trace.Wrap(err)
 	}

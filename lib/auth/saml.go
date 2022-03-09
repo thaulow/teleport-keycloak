@@ -83,8 +83,7 @@ func (a *Server) DeleteSAMLConnector(ctx context.Context, connectorName string) 
 	return nil
 }
 
-func (a *Server) CreateSAMLAuthRequest(req services.SAMLAuthRequest) (*services.SAMLAuthRequest, error) {
-	ctx := context.TODO()
+func (a *Server) CreateSAMLAuthRequest(ctx context.Context, req services.SAMLAuthRequest) (*services.SAMLAuthRequest, error) {
 	connector, err := a.Identity.GetSAMLConnector(ctx, req.ConnectorID, true)
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -121,7 +120,7 @@ func (a *Server) CreateSAMLAuthRequest(req services.SAMLAuthRequest) (*services.
 		return nil, trace.Wrap(err)
 	}
 
-	err = a.Identity.CreateSAMLAuthRequest(req, defaults.SAMLAuthRequestTTL)
+	err = a.Identity.CreateSAMLAuthRequest(ctx, req, defaults.SAMLAuthRequestTTL)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -178,7 +177,7 @@ func (a *Server) calculateSAMLUser(connector types.SAMLConnector, assertionInfo 
 	return &p, nil
 }
 
-func (a *Server) createSAMLUser(p *createUserParams) (types.User, error) {
+func (a *Server) createSAMLUser(ctx context.Context, p *createUserParams) (types.User, error) {
 	expires := a.GetClock().Now().UTC().Add(p.sessionTTL)
 
 	log.Debugf("Generating dynamic SAML identity %v/%v with roles: %v.", p.connectorName, p.username, p.roles)
@@ -215,12 +214,10 @@ func (a *Server) createSAMLUser(p *createUserParams) (types.User, error) {
 	}
 
 	// Get the user to check if it already exists or not.
-	existingUser, err := a.Identity.GetUser(p.username, false)
+	existingUser, err := a.Identity.GetUser(ctx, p.username, false)
 	if err != nil && !trace.IsNotFound(err) {
 		return nil, trace.Wrap(err)
 	}
-
-	ctx := context.TODO()
 
 	// Overwrite exisiting user if it was created from an external identity provider.
 	if existingUser != nil {
@@ -308,14 +305,14 @@ type SAMLAuthResponse struct {
 }
 
 // ValidateSAMLResponse consumes attribute statements from SAML identity provider
-func (a *Server) ValidateSAMLResponse(samlResponse string) (*SAMLAuthResponse, error) {
+func (a *Server) ValidateSAMLResponse(ctx context.Context, samlResponse string) (*SAMLAuthResponse, error) {
 	event := &apievents.UserLogin{
 		Metadata: apievents.Metadata{
 			Type: events.UserLoginEvent,
 		},
 		Method: events.LoginMethodSAML,
 	}
-	re, err := a.validateSAMLResponse(samlResponse)
+	re, err := a.validateSAMLResponse(ctx, samlResponse)
 	if re != nil && re.attributeStatements != nil {
 		attributes, err := apievents.EncodeMapStrings(re.attributeStatements)
 		if err != nil {
@@ -352,13 +349,12 @@ type samlAuthResponse struct {
 	attributeStatements map[string][]string
 }
 
-func (a *Server) validateSAMLResponse(samlResponse string) (*samlAuthResponse, error) {
-	ctx := context.TODO()
+func (a *Server) validateSAMLResponse(ctx context.Context, samlResponse string) (*samlAuthResponse, error) {
 	requestID, err := parseSAMLInResponseTo(samlResponse)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	request, err := a.Identity.GetSAMLAuthRequest(requestID)
+	request, err := a.Identity.GetSAMLAuthRequest(ctx, requestID)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -410,7 +406,7 @@ func (a *Server) validateSAMLResponse(samlResponse string) (*samlAuthResponse, e
 	if err != nil {
 		return re, trace.Wrap(err)
 	}
-	user, err := a.createSAMLUser(params)
+	user, err := a.createSAMLUser(ctx, params)
 	if err != nil {
 		return re, trace.Wrap(err)
 	}
@@ -427,7 +423,7 @@ func (a *Server) validateSAMLResponse(samlResponse string) (*samlAuthResponse, e
 
 	// If the request is coming from a browser, create a web session.
 	if request.CreateWebSession {
-		session, err := a.createWebSession(context.TODO(), types.NewWebSessionRequest{
+		session, err := a.createWebSession(ctx, types.NewWebSessionRequest{
 			User:       user.GetName(),
 			Roles:      user.GetRoles(),
 			Traits:     user.GetTraits(),
@@ -443,11 +439,11 @@ func (a *Server) validateSAMLResponse(samlResponse string) (*samlAuthResponse, e
 
 	// If a public key was provided, sign it and return a certificate.
 	if len(request.PublicKey) != 0 {
-		sshCert, tlsCert, err := a.createSessionCert(user, params.sessionTTL, request.PublicKey, request.Compatibility, request.RouteToCluster, request.KubernetesCluster)
+		sshCert, tlsCert, err := a.createSessionCert(ctx, user, params.sessionTTL, request.PublicKey, request.Compatibility, request.RouteToCluster, request.KubernetesCluster)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
-		clusterName, err := a.GetClusterName()
+		clusterName, err := a.GetClusterName(ctx)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
@@ -455,7 +451,7 @@ func (a *Server) validateSAMLResponse(samlResponse string) (*samlAuthResponse, e
 		re.auth.TLSCert = tlsCert
 
 		// Return the host CA for this cluster only.
-		authority, err := a.GetCertAuthority(types.CertAuthID{
+		authority, err := a.GetCertAuthority(ctx, types.CertAuthID{
 			Type:       types.HostCA,
 			DomainName: clusterName.GetClusterName(),
 		}, false)

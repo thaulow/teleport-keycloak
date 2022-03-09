@@ -17,6 +17,7 @@ limitations under the License.
 package reversetunnel
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"sync"
@@ -119,7 +120,7 @@ func (p *clusterPeers) GetLastConnected() time.Time {
 	return peer.GetLastConnected()
 }
 
-func (p *clusterPeers) DialAuthServer() (net.Conn, error) {
+func (p *clusterPeers) DialAuthServer(ctx context.Context) (net.Conn, error) {
 	return nil, trace.ConnectionProblem(nil, "unable to dial to auth server, this proxy has not been discovered yet, try again later")
 }
 

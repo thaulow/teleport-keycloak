@@ -18,7 +18,6 @@ package reversetunnel
 
 import (
 	"context"
-
 	"fmt"
 	"net"
 	"time"
@@ -74,7 +73,7 @@ func (params DialParams) String() string {
 // There are two implementations of this interface: local and remote sites.
 type RemoteSite interface {
 	// DialAuthServer returns a net.Conn to the Auth Server of a site.
-	DialAuthServer() (net.Conn, error)
+	DialAuthServer(ctx context.Context) (net.Conn, error)
 	// Dial dials any address within the site network, in terminating
 	// mode it uses local instance of forwarding server to terminate
 	// and record the connection
@@ -106,9 +105,9 @@ type RemoteSite interface {
 // using unified interface.
 type Tunnel interface {
 	// GetSites returns a list of connected remote sites
-	GetSites() ([]RemoteSite, error)
+	GetSites(ctx context.Context) ([]RemoteSite, error)
 	// GetSite returns remote site this node belongs to
-	GetSite(domainName string) (RemoteSite, error)
+	GetSite(ctx context.Context, domainName string) (RemoteSite, error)
 }
 
 // Server is a TCP/IP SSH server which listens on an SSH endpoint and remote/local

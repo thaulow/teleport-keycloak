@@ -56,7 +56,7 @@ func (w *WriterLog) Close() error {
 }
 
 // EmitAuditEventLegacy emits audit event
-func (w *WriterLog) EmitAuditEventLegacy(event Event, fields EventFields) error {
+func (w *WriterLog) EmitAuditEventLegacy(ctx context.Context, event Event, fields EventFields) error {
 	err := UpdateEventFields(event, fields, w.clock, w.newUID)
 	if err != nil {
 		log.Error(err)
@@ -76,12 +76,12 @@ func (w *WriterLog) EmitAuditEventLegacy(event Event, fields EventFields) error 
 // This method is no longer necessary as nodes and proxies >= 2.7.0
 // use UploadSessionRecording method.
 // PostSessionSlice sends chunks of recorded session to the event log
-func (w *WriterLog) PostSessionSlice(SessionSlice) error {
+func (w *WriterLog) PostSessionSlice(context.Context, SessionSlice) error {
 	return trace.NotImplemented("not implemented")
 }
 
 // UploadSessionRecording uploads session recording to the audit server
-func (w *WriterLog) UploadSessionRecording(r SessionRecording) error {
+func (w *WriterLog) UploadSessionRecording(ctx context.Context, r SessionRecording) error {
 	return trace.NotImplemented("not implemented")
 }
 
@@ -90,7 +90,7 @@ func (w *WriterLog) UploadSessionRecording(r SessionRecording) error {
 // beginning) up to maxBytes bytes.
 //
 // If maxBytes > MaxChunkBytes, it gets rounded down to MaxChunkBytes
-func (w *WriterLog) GetSessionChunk(namespace string, sid session.ID, offsetBytes, maxBytes int) ([]byte, error) {
+func (w *WriterLog) GetSessionChunk(ctx context.Context, namespace string, sid session.ID, offsetBytes, maxBytes int) ([]byte, error) {
 	return nil, trace.NotImplemented("not implemented")
 }
 
@@ -101,7 +101,7 @@ func (w *WriterLog) GetSessionChunk(namespace string, sid session.ID, offsetByte
 //
 // This function is usually used in conjunction with GetSessionReader to
 // replay recorded session streams.
-func (w *WriterLog) GetSessionEvents(namespace string, sid session.ID, after int, includePrintEvents bool) ([]EventFields, error) {
+func (w *WriterLog) GetSessionEvents(ctx context.Context, namespace string, sid session.ID, after int, includePrintEvents bool) ([]EventFields, error) {
 	return nil, trace.NotImplemented("not implemented")
 }
 
@@ -112,7 +112,7 @@ func (w *WriterLog) GetSessionEvents(namespace string, sid session.ID, after int
 //
 // The only mandatory requirement is a date range (UTC). Results must always
 // show up sorted by date (newest first)
-func (w *WriterLog) SearchEvents(fromUTC, toUTC time.Time, namespace string, eventTypes []string, limit int, order types.EventOrder, startKey string) (events []apievents.AuditEvent, lastKey string, err error) {
+func (w *WriterLog) SearchEvents(ctx context.Context, fromUTC, toUTC time.Time, namespace string, eventTypes []string, limit int, order types.EventOrder, startKey string) (events []apievents.AuditEvent, lastKey string, err error) {
 	return nil, "", trace.NotImplemented("not implemented")
 }
 
@@ -122,7 +122,7 @@ func (w *WriterLog) SearchEvents(fromUTC, toUTC time.Time, namespace string, eve
 //
 // Event types to filter can be specified and pagination is handled by an iterator key that allows
 // a query to be resumed.
-func (w *WriterLog) SearchSessionEvents(fromUTC, toUTC time.Time, limit int, order types.EventOrder, startKey string) (events []apievents.AuditEvent, lastKey string, err error) {
+func (w *WriterLog) SearchSessionEvents(ctx context.Context, fromUTC, toUTC time.Time, limit int, order types.EventOrder, startKey string) (events []apievents.AuditEvent, lastKey string, err error) {
 	return nil, "", trace.NotImplemented("not implemented")
 }
 

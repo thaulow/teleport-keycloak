@@ -104,12 +104,12 @@ func (s *Server) CreateResetPasswordToken(ctx context.Context, req CreateResetPa
 		return nil, trace.Wrap(err)
 	}
 
-	_, err = s.GetUser(req.Name, false)
+	_, err = s.GetUser(ctx, req.Name, false)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
-	_, err = s.ResetPassword(req.Name)
+	_, err = s.ResetPassword(ctx, req.Name)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -118,7 +118,7 @@ func (s *Server) CreateResetPasswordToken(ctx context.Context, req CreateResetPa
 		return nil, trace.Wrap(err)
 	}
 
-	token, err := s.newResetPasswordToken(req)
+	token, err := s.newResetPasswordToken(ctx, req)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -166,19 +166,19 @@ func (s *Server) resetMFA(ctx context.Context, user string) error {
 
 // proxyDomainGetter is a reduced subset of the Auth API for formatAccountName.
 type proxyDomainGetter interface {
-	GetProxies() ([]types.Server, error)
-	GetDomainName() (string, error)
+	GetProxies(ctx context.Context) ([]types.Server, error)
+	GetDomainName(ctx context.Context) (string, error)
 }
 
 // formatAccountName builds the account name to display in OTP applications.
 // Format for accountName is user@address. User is passed in, this function
 // tries to find the best available address.
-func formatAccountName(s proxyDomainGetter, username string, authHostname string) (string, error) {
+func formatAccountName(ctx context.Context, s proxyDomainGetter, username string, authHostname string) (string, error) {
 	var err error
 	var proxyHost string
 
 	// Get a list of proxies.
-	proxies, err := s.GetProxies()
+	proxies, err := s.GetProxies(ctx)
 	if err != nil {
 		return "", trace.Wrap(err)
 	}
@@ -191,7 +191,7 @@ func formatAccountName(s proxyDomainGetter, username string, authHostname string
 	// use that. If none of the proxies have a public address set, use the
 	// hostname of the first proxy found.
 	if len(proxies) == 0 {
-		proxyHost, err = s.GetDomainName()
+		proxyHost, err = s.GetDomainName(ctx)
 		if err != nil {
 			log.Errorf("Failed to retrieve cluster name, falling back to hostname: %v.", err)
 			proxyHost = authHostname
@@ -217,7 +217,7 @@ func (s *Server) RotateResetPasswordTokenSecrets(ctx context.Context, tokenID st
 		return nil, trace.Wrap(err)
 	}
 
-	key, _, err := s.newTOTPKey(token.GetUser())
+	key, _, err := s.newTOTPKey(ctx, token.GetUser())
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -246,13 +246,13 @@ func (s *Server) RotateResetPasswordTokenSecrets(ctx context.Context, tokenID st
 	return secrets, nil
 }
 
-func (s *Server) newTOTPKey(user string) (*otp.Key, *totp.GenerateOpts, error) {
+func (s *Server) newTOTPKey(ctx context.Context, user string) (*otp.Key, *totp.GenerateOpts, error) {
 	// Fetch account name to display in OTP apps.
-	accountName, err := formatAccountName(s, user, s.AuthServiceName)
+	accountName, err := formatAccountName(ctx, s, user, s.AuthServiceName)
 	if err != nil {
 		return nil, nil, trace.Wrap(err)
 	}
-	clusterName, err := s.GetClusterName()
+	clusterName, err := s.GetClusterName(ctx)
 	if err != nil {
 		return nil, nil, trace.Wrap(err)
 	}
@@ -271,7 +271,7 @@ func (s *Server) newTOTPKey(user string) (*otp.Key, *totp.GenerateOpts, error) {
 	return key, &opts, nil
 }
 
-func (s *Server) newResetPasswordToken(req CreateResetPasswordTokenRequest) (types.ResetPasswordToken, error) {
+func (s *Server) newResetPasswordToken(ctx context.Context, req CreateResetPasswordTokenRequest) (types.ResetPasswordToken, error) {
 	var err error
 	var proxyHost string
 
@@ -282,7 +282,7 @@ func (s *Server) newResetPasswordToken(req CreateResetPasswordTokenRequest) (typ
 
 	// Get the list of proxies and try and guess the address of the proxy. If
 	// failed to guess public address, use "<proxyhost>:3080" as a fallback.
-	proxies, err := s.GetProxies()
+	proxies, err := s.GetProxies(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

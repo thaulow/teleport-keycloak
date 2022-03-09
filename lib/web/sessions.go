@@ -145,9 +145,9 @@ func (c *SessionContext) GetClientConnection() *grpc.ClientConn {
 // the requested site. If the site is local a client with the users local role
 // is returned. If the site is remote a client with the users remote role is
 // returned.
-func (c *SessionContext) GetUserClient(site reversetunnel.RemoteSite) (auth.ClientI, error) {
+func (c *SessionContext) GetUserClient(ctx context.Context, site reversetunnel.RemoteSite) (auth.ClientI, error) {
 	// get the name of the current cluster
-	clusterName, err := c.clt.GetClusterName()
+	clusterName, err := c.clt.GetClusterName(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -179,7 +179,7 @@ func (c *SessionContext) GetUserClient(site reversetunnel.RemoteSite) (auth.Clie
 // newRemoteClient returns a client to a remote cluster with the role of
 // the logged in user.
 func (c *SessionContext) newRemoteClient(cluster reversetunnel.RemoteSite) (auth.ClientI, error) {
-	clt, err := c.tryRemoteTLSClient(cluster)
+	clt, err := c.tryRemoteTLSClient(context.TODO(), cluster)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -189,18 +189,18 @@ func (c *SessionContext) newRemoteClient(cluster reversetunnel.RemoteSite) (auth
 // clusterDialer returns DialContext function using cluster's dial function
 func clusterDialer(remoteCluster reversetunnel.RemoteSite) apiclient.ContextDialer {
 	return apiclient.ContextDialerFunc(func(in context.Context, network, _ string) (net.Conn, error) {
-		return remoteCluster.DialAuthServer()
+		return remoteCluster.DialAuthServer(in)
 	})
 }
 
 // tryRemoteTLSClient tries creating TLS client and using it (the client may not be available
 // due to older clusters), returns client if it is working properly
-func (c *SessionContext) tryRemoteTLSClient(cluster reversetunnel.RemoteSite) (auth.ClientI, error) {
-	clt, err := c.newRemoteTLSClient(cluster)
+func (c *SessionContext) tryRemoteTLSClient(ctx context.Context, cluster reversetunnel.RemoteSite) (auth.ClientI, error) {
+	clt, err := c.newRemoteTLSClient(ctx, cluster)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	_, err = clt.GetDomainName()
+	_, err = clt.GetDomainName(ctx)
 	if err != nil {
 		return clt, trace.Wrap(err)
 	}
@@ -209,10 +209,10 @@ func (c *SessionContext) tryRemoteTLSClient(cluster reversetunnel.RemoteSite) (a
 
 // ClientTLSConfig returns client TLS authentication associated
 // with the web session context
-func (c *SessionContext) ClientTLSConfig(clusterName ...string) (*tls.Config, error) {
+func (c *SessionContext) ClientTLSConfig(ctx context.Context, clusterName ...string) (*tls.Config, error) {
 	var certPool *x509.CertPool
 	if len(clusterName) == 0 {
-		certAuthorities, err := c.parent.proxyClient.GetCertAuthorities(types.HostCA, false)
+		certAuthorities, err := c.parent.proxyClient.GetCertAuthorities(ctx, types.HostCA, false)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
@@ -221,7 +221,7 @@ func (c *SessionContext) ClientTLSConfig(clusterName ...string) (*tls.Config, er
 			return nil, trace.Wrap(err)
 		}
 	} else {
-		certAuthority, err := c.parent.proxyClient.GetCertAuthority(types.CertAuthID{
+		certAuthority, err := c.parent.proxyClient.GetCertAuthority(ctx, types.CertAuthID{
 			Type:       types.HostCA,
 			DomainName: clusterName[0],
 		}, false)
@@ -246,8 +246,8 @@ func (c *SessionContext) ClientTLSConfig(clusterName ...string) (*tls.Config, er
 	return tlsConfig, nil
 }
 
-func (c *SessionContext) newRemoteTLSClient(cluster reversetunnel.RemoteSite) (auth.ClientI, error) {
-	tlsConfig, err := c.ClientTLSConfig(cluster.GetName())
+func (c *SessionContext) newRemoteTLSClient(ctx context.Context, cluster reversetunnel.RemoteSite) (auth.ClientI, error) {
+	tlsConfig, err := c.ClientTLSConfig(ctx, cluster.GetName())
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -266,8 +266,8 @@ func (c *SessionContext) GetUser() string {
 
 // extendWebSession creates a new web session for this user
 // based on the previous session
-func (c *SessionContext) extendWebSession(accessRequestID string, switchback bool) (types.WebSession, error) {
-	session, err := c.clt.ExtendWebSession(auth.WebSessionReq{
+func (c *SessionContext) extendWebSession(ctx context.Context, accessRequestID string, switchback bool) (types.WebSession, error) {
+	session, err := c.clt.ExtendWebSession(ctx, auth.WebSessionReq{
 		User:            c.user,
 		PrevSessionID:   c.session.GetName(),
 		AccessRequestID: accessRequestID,
@@ -306,7 +306,7 @@ func (c *SessionContext) GetAgent() (agent.Agent, *ssh.Certificate, error) {
 }
 
 func (c *SessionContext) getCheckers() ([]ssh.PublicKey, error) {
-	cas, err := c.unsafeAccessPoint.GetCertAuthorities(types.HostCA, false)
+	cas, err := c.unsafeAccessPoint.GetCertAuthorities(context.TODO(), types.HostCA, false)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -460,7 +460,7 @@ type sessionCacheOptions struct {
 
 // newSessionCache returns new instance of the session cache
 func newSessionCache(config sessionCacheOptions) (*sessionCache, error) {
-	clusterName, err := config.proxyClient.GetClusterName()
+	clusterName, err := config.proxyClient.GetClusterName(context.TODO())
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -549,8 +549,8 @@ func (s *sessionCache) clearExpiredSessions(ctx context.Context) {
 
 // AuthWithOTP authenticates the specified user with the given password and OTP token.
 // Returns a new web session if successful.
-func (s *sessionCache) AuthWithOTP(user, pass, otpToken string) (types.WebSession, error) {
-	return s.proxyClient.AuthenticateWebUser(auth.AuthenticateUserRequest{
+func (s *sessionCache) AuthWithOTP(ctx context.Context, user, pass, otpToken string) (types.WebSession, error) {
+	return s.proxyClient.AuthenticateWebUser(ctx, auth.AuthenticateUserRequest{
 		Username: user,
 		Pass:     &auth.PassCreds{Password: []byte(pass)},
 		OTP: &auth.OTPCreds{
@@ -562,8 +562,8 @@ func (s *sessionCache) AuthWithOTP(user, pass, otpToken string) (types.WebSessio
 
 // AuthWithoutOTP authenticates the specified user with the given password.
 // Returns a new web session if successful.
-func (s *sessionCache) AuthWithoutOTP(user, pass string) (types.WebSession, error) {
-	return s.proxyClient.AuthenticateWebUser(auth.AuthenticateUserRequest{
+func (s *sessionCache) AuthWithoutOTP(ctx context.Context, user, pass string) (types.WebSession, error) {
+	return s.proxyClient.AuthenticateWebUser(ctx, auth.AuthenticateUserRequest{
 		Username: user,
 		Pass: &auth.PassCreds{
 			Password: []byte(pass),
@@ -571,12 +571,12 @@ func (s *sessionCache) AuthWithoutOTP(user, pass string) (types.WebSession, erro
 	})
 }
 
-func (s *sessionCache) GetMFAAuthenticateChallenge(user, pass string) (*auth.MFAAuthenticateChallenge, error) {
-	return s.proxyClient.GetMFAAuthenticateChallenge(user, []byte(pass))
+func (s *sessionCache) GetMFAAuthenticateChallenge(ctx context.Context, user, pass string) (*auth.MFAAuthenticateChallenge, error) {
+	return s.proxyClient.GetMFAAuthenticateChallenge(ctx, user, []byte(pass))
 }
 
-func (s *sessionCache) AuthWithU2FSignResponse(user string, response *u2f.AuthenticateChallengeResponse) (types.WebSession, error) {
-	return s.proxyClient.AuthenticateWebUser(auth.AuthenticateUserRequest{
+func (s *sessionCache) AuthWithU2FSignResponse(ctx context.Context, user string, response *u2f.AuthenticateChallengeResponse) (types.WebSession, error) {
+	return s.proxyClient.AuthenticateWebUser(ctx, auth.AuthenticateUserRequest{
 		Username: user,
 		U2F: &auth.U2FSignResponseCreds{
 			SignResponse: *response,
@@ -585,8 +585,8 @@ func (s *sessionCache) AuthWithU2FSignResponse(user string, response *u2f.Authen
 }
 
 // GetCertificateWithoutOTP returns a new user certificate for the specified request.
-func (s *sessionCache) GetCertificateWithoutOTP(c client.CreateSSHCertReq) (*auth.SSHLoginResponse, error) {
-	return s.proxyClient.AuthenticateSSHUser(auth.AuthenticateSSHRequest{
+func (s *sessionCache) GetCertificateWithoutOTP(ctx context.Context, c client.CreateSSHCertReq) (*auth.SSHLoginResponse, error) {
+	return s.proxyClient.AuthenticateSSHUser(ctx, auth.AuthenticateSSHRequest{
 		AuthenticateUserRequest: auth.AuthenticateUserRequest{
 			Username: c.User,
 			Pass: &auth.PassCreds{
@@ -603,8 +603,8 @@ func (s *sessionCache) GetCertificateWithoutOTP(c client.CreateSSHCertReq) (*aut
 
 // GetCertificateWithOTP returns a new user certificate for the specified request.
 // The request is used with the given OTP token.
-func (s *sessionCache) GetCertificateWithOTP(c client.CreateSSHCertReq) (*auth.SSHLoginResponse, error) {
-	return s.proxyClient.AuthenticateSSHUser(auth.AuthenticateSSHRequest{
+func (s *sessionCache) GetCertificateWithOTP(ctx context.Context, c client.CreateSSHCertReq) (*auth.SSHLoginResponse, error) {
+	return s.proxyClient.AuthenticateSSHUser(ctx, auth.AuthenticateSSHRequest{
 		AuthenticateUserRequest: auth.AuthenticateUserRequest{
 			Username: c.User,
 			OTP: &auth.OTPCreds{
@@ -620,7 +620,7 @@ func (s *sessionCache) GetCertificateWithOTP(c client.CreateSSHCertReq) (*auth.S
 	})
 }
 
-func (s *sessionCache) GetCertificateWithMFA(c client.CreateSSHCertWithMFAReq) (*auth.SSHLoginResponse, error) {
+func (s *sessionCache) GetCertificateWithMFA(ctx context.Context, c client.CreateSSHCertWithMFAReq) (*auth.SSHLoginResponse, error) {
 	authReq := auth.AuthenticateUserRequest{
 		Username: c.User,
 	}
@@ -638,7 +638,7 @@ func (s *sessionCache) GetCertificateWithMFA(c client.CreateSSHCertWithMFAReq) (
 			Token:    c.TOTPCode,
 		}
 	}
-	return s.proxyClient.AuthenticateSSHUser(auth.AuthenticateSSHRequest{
+	return s.proxyClient.AuthenticateSSHUser(ctx, auth.AuthenticateSSHRequest{
 		AuthenticateUserRequest: authReq,
 		PublicKey:               c.PubKey,
 		CompatibilityMode:       c.Compatibility,
@@ -653,12 +653,12 @@ func (s *sessionCache) Ping(ctx context.Context) (proto.PingResponse, error) {
 	return s.proxyClient.Ping(ctx)
 }
 
-func (s *sessionCache) GetUserInviteU2FRegisterRequest(token string) (*u2f.RegisterChallenge, error) {
-	return s.proxyClient.GetSignupU2FRegisterRequest(token)
+func (s *sessionCache) GetUserInviteU2FRegisterRequest(ctx context.Context, token string) (*u2f.RegisterChallenge, error) {
+	return s.proxyClient.GetSignupU2FRegisterRequest(ctx, token)
 }
 
-func (s *sessionCache) ValidateTrustedCluster(validateRequest *auth.ValidateTrustedClusterRequest) (*auth.ValidateTrustedClusterResponse, error) {
-	return s.proxyClient.ValidateTrustedCluster(validateRequest)
+func (s *sessionCache) ValidateTrustedCluster(ctx context.Context, validateRequest *auth.ValidateTrustedClusterRequest) (*auth.ValidateTrustedClusterResponse, error) {
+	return s.proxyClient.ValidateTrustedCluster(ctx, validateRequest)
 }
 
 // validateSession validates the session given with user and session ID.
@@ -671,7 +671,7 @@ func (s *sessionCache) validateSession(ctx context.Context, user, sessionID stri
 	if !trace.IsNotFound(err) {
 		return nil, trace.Wrap(err)
 	}
-	return s.newSessionContext(user, sessionID)
+	return s.newSessionContext(ctx, user, sessionID)
 }
 
 func (s *sessionCache) invalidateSession(ctx *SessionContext) error {
@@ -774,8 +774,8 @@ func (s *sessionCache) upsertSessionContext(user string) *sessionResources {
 }
 
 // newSessionContext creates a new web session context for the specified user/session ID
-func (s *sessionCache) newSessionContext(user, sessionID string) (*SessionContext, error) {
-	session, err := s.proxyClient.AuthenticateWebUser(auth.AuthenticateUserRequest{
+func (s *sessionCache) newSessionContext(ctx context.Context, user, sessionID string) (*SessionContext, error) {
+	session, err := s.proxyClient.AuthenticateWebUser(ctx, auth.AuthenticateUserRequest{
 		Username: user,
 		Session: &auth.SessionCreds{
 			ID: sessionID,
@@ -785,11 +785,11 @@ func (s *sessionCache) newSessionContext(user, sessionID string) (*SessionContex
 		// This will fail if the session has expired and was removed
 		return nil, trace.Wrap(err)
 	}
-	return s.newSessionContextFromSession(session)
+	return s.newSessionContextFromSession(ctx, session)
 }
 
-func (s *sessionCache) newSessionContextFromSession(session types.WebSession) (*SessionContext, error) {
-	tlsConfig, err := s.tlsConfig(session.GetTLSCert(), session.GetPriv())
+func (s *sessionCache) newSessionContextFromSession(ctx context.Context, session types.WebSession) (*SessionContext, error) {
+	tlsConfig, err := s.tlsConfig(ctx, session.GetTLSCert(), session.GetPriv())
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -801,7 +801,7 @@ func (s *sessionCache) newSessionContextFromSession(session types.WebSession) (*
 		return nil, trace.Wrap(err)
 	}
 
-	ctx := &SessionContext{
+	sctx := &SessionContext{
 		clt:               userClient,
 		unsafeAccessPoint: s.accessPoint,
 		remoteClt:         make(map[string]auth.ClientI),
@@ -817,17 +817,17 @@ func (s *sessionCache) newSessionContextFromSession(session types.WebSession) (*
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	if exists := s.insertContext(session.GetUser(), ctx); exists {
+	if exists := s.insertContext(session.GetUser(), sctx); exists {
 		// this means that someone has just inserted the context, so
 		// close our extra context and return
-		ctx.Close()
+		sctx.Close()
 	}
 
-	return ctx, nil
+	return sctx, nil
 }
 
-func (s *sessionCache) tlsConfig(cert, privKey []byte) (*tls.Config, error) {
-	ca, err := s.proxyClient.GetCertAuthority(types.CertAuthID{
+func (s *sessionCache) tlsConfig(ctx context.Context, cert, privKey []byte) (*tls.Config, error) {
+	ca, err := s.proxyClient.GetCertAuthority(ctx, types.CertAuthID{
 		Type:       types.HostCA,
 		DomainName: s.clusterName,
 	}, false)

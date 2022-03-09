@@ -1441,7 +1441,7 @@ func (tc *TeleportClient) Join(ctx context.Context, namespace string, sessionID 
 	}
 
 	// find the session ID on the site:
-	sessions, err := site.GetSessions(namespace)
+	sessions, err := site.GetSessions(context.TODO(), namespace)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -1523,14 +1523,14 @@ func (tc *TeleportClient) Play(ctx context.Context, namespace, sessionID string)
 		return trace.Wrap(err)
 	}
 	// request events for that session (to get timing data)
-	sessionEvents, err = site.GetSessionEvents(namespace, *sid, 0, true)
+	sessionEvents, err = site.GetSessionEvents(ctx, namespace, *sid, 0, true)
 	if err != nil {
 		return trace.Wrap(err)
 	}
 
 	// read the stream into a buffer:
 	for {
-		tmp, err := site.GetSessionChunk(namespace, *sid, len(stream), events.MaxChunkBytes)
+		tmp, err := site.GetSessionChunk(ctx, namespace, *sid, len(stream), events.MaxChunkBytes)
 		if err != nil {
 			return trace.Wrap(err)
 		}
@@ -1562,7 +1562,7 @@ func (tc *TeleportClient) GetSessionEvents(ctx context.Context, namespace, sessi
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	events, err := site.GetSessionEvents(namespace, *sid, 0, true)
+	events, err := site.GetSessionEvents(ctx, namespace, *sid, 0, true)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -2461,7 +2461,7 @@ func (tc *TeleportClient) GetTrustedCA(ctx context.Context, clusterName string) 
 	}
 
 	// Get the list of host certificates that this cluster knows about.
-	return clt.GetCertAuthorities(types.HostCA, false)
+	return clt.GetCertAuthorities(ctx, types.HostCA, false)
 }
 
 // UpdateTrustedCA connects to the Auth Server and fetches all host certificates

@@ -190,7 +190,7 @@ func newProxySubsys(ctx *srv.ServerContext, srv *Server, req proxySubsysRequest)
 		req.clusterName = ctx.Identity.RouteToCluster
 	}
 	if req.clusterName != "" && srv.proxyTun != nil {
-		_, err := srv.tunnelWithRoles(ctx).GetSite(req.clusterName)
+		_, err := srv.tunnelWithRoles(ctx).GetSite(ctx.CancelContext(), req.clusterName)
 		if err != nil {
 			return nil, trace.BadParameter("invalid format for proxy request: unknown cluster %q", req.clusterName)
 		}
@@ -243,7 +243,7 @@ func (t *proxySubsys) Start(sconn *ssh.ServerConn, ch ssh.Channel, req *ssh.Requ
 	}
 	// get the cluster by name:
 	if t.clusterName != "" {
-		site, err = tunnel.GetSite(t.clusterName)
+		site, err = tunnel.GetSite(ctx.CancelContext(), t.clusterName)
 		if err != nil {
 			t.log.Warn(err)
 			return trace.Wrap(err)
@@ -253,7 +253,7 @@ func (t *proxySubsys) Start(sconn *ssh.ServerConn, ch ssh.Channel, req *ssh.Requ
 	if t.host != "" {
 		// no site given? use the 1st one:
 		if site == nil {
-			sites, err := tunnel.GetSites()
+			sites, err := tunnel.GetSites(ctx.CancelContext())
 			if err != nil {
 				return trace.Wrap(err)
 			}
@@ -275,7 +275,7 @@ func (t *proxySubsys) Start(sconn *ssh.ServerConn, ch ssh.Channel, req *ssh.Requ
 // auth server of the requested remote site
 func (t *proxySubsys) proxyToSite(
 	ctx *srv.ServerContext, site reversetunnel.RemoteSite, remoteAddr net.Addr, ch ssh.Channel) error {
-	conn, err := site.DialAuthServer()
+	conn, err := site.DialAuthServer(ctx.CancelContext())
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -318,7 +318,7 @@ func (t *proxySubsys) proxyToHost(
 		servers  []types.Server
 		err      error
 	)
-	localCluster, _ := t.srv.authService.GetClusterName()
+	localCluster, _ := t.srv.authService.GetClusterName(ctx.CancelContext())
 	// going to "local" CA? let's use the caching 'auth service' directly and avoid
 	// hitting the reverse tunnel link (it can be offline if the CA is down)
 	if site.GetName() == localCluster.GetName() {

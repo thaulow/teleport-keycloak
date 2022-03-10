@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gravitational/trace"
 	"github.com/stretchr/testify/require"
 
 	"github.com/gravitational/teleport/api/client/proto"
@@ -36,7 +37,6 @@ import (
 	"github.com/gravitational/teleport/lib/services"
 	"github.com/gravitational/teleport/lib/tlsca"
 	"github.com/gravitational/teleport/lib/utils"
-	"github.com/gravitational/trace"
 )
 
 func TestAuthSignKubeconfig(t *testing.T) {
@@ -60,12 +60,15 @@ func TestAuthSignKubeconfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	_, cert, err := tlsca.GenerateSelfSignedCA(pkix.Name{CommonName: "example.com"}, nil, time.Minute)
+	require.NoError(t, err)
+
 	ca, err := types.NewCertAuthority(types.CertAuthoritySpecV2{
 		Type:        types.HostCA,
 		ClusterName: "example.com",
 		ActiveKeys: types.CAKeySet{
 			SSH: []*types.SSHKeyPair{{PublicKey: []byte("SSH CA cert")}},
-			TLS: []*types.TLSKeyPair{{Cert: []byte("TLS CA cert")}},
+			TLS: []*types.TLSKeyPair{{Cert: cert}},
 		},
 		Roles:      nil,
 		SigningAlg: types.CertAuthoritySpecV2_RSA_SHA2_512,
@@ -77,7 +80,10 @@ func TestAuthSignKubeconfig(t *testing.T) {
 		remoteClusters: []types.RemoteCluster{remoteCluster},
 		userCerts: &proto.Certs{
 			SSH: []byte("SSH cert"),
-			TLS: []byte("TLS cert"),
+			TLS: cert,
+			TLSCACerts: [][]byte{
+				cert,
+			},
 		},
 		cas: []types.CertAuthority{ca},
 		proxies: []types.Server{
@@ -98,17 +104,55 @@ func TestAuthSignKubeconfig(t *testing.T) {
 		ac          AuthCommand
 		wantAddr    string
 		wantCluster string
-		wantError   string
+		assertErr   require.ErrorAssertionFunc
 	}{
 		{
-			desc: "--proxy specified",
+			desc: "valid --proxy URL with valid URL scheme",
+			ac: AuthCommand{
+				output:        filepath.Join(tmpDir, "kubeconfig"),
+				outputFormat:  identityfile.FormatKubernetes,
+				signOverwrite: true,
+				proxyAddr:     "https://proxy-from-flag.example.com",
+			},
+			wantAddr:  "https://proxy-from-flag.example.com",
+			assertErr: require.NoError,
+		},
+		{
+			desc: "valid --proxy URL with invalid URL scheme",
+			ac: AuthCommand{
+				output:        filepath.Join(tmpDir, "kubeconfig"),
+				outputFormat:  identityfile.FormatKubernetes,
+				signOverwrite: true,
+				proxyAddr:     "file://proxy-from-flag.example.com",
+			},
+			assertErr: func(t require.TestingT, err error, _ ...interface{}) {
+				require.Error(t, err)
+				require.Equal(t, err.Error(), "expected --proxy URL with http or https scheme")
+			},
+		},
+		{
+			desc: "valid --proxy URL without URL scheme",
 			ac: AuthCommand{
 				output:        filepath.Join(tmpDir, "kubeconfig"),
 				outputFormat:  identityfile.FormatKubernetes,
 				signOverwrite: true,
 				proxyAddr:     "proxy-from-flag.example.com",
 			},
-			wantAddr: "proxy-from-flag.example.com",
+			wantAddr:  "https://proxy-from-flag.example.com",
+			assertErr: require.NoError,
+		},
+		{
+			desc: "invalid --proxy URL",
+			ac: AuthCommand{
+				output:        filepath.Join(tmpDir, "kubeconfig"),
+				outputFormat:  identityfile.FormatKubernetes,
+				signOverwrite: true,
+				proxyAddr:     "1https://proxy-from-flag.example.com",
+			},
+			assertErr: func(t require.TestingT, err error, _ ...interface{}) {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), "specified --proxy URL is invalid")
+			},
 		},
 		{
 			desc: "k8s proxy running locally with public_addr",
@@ -121,7 +165,8 @@ func TestAuthSignKubeconfig(t *testing.T) {
 					PublicAddrs: []utils.NetAddr{{Addr: "proxy-from-config.example.com:3026"}},
 				}}},
 			},
-			wantAddr: "https://proxy-from-config.example.com:3026",
+			wantAddr:  "https://proxy-from-config.example.com:3026",
+			assertErr: require.NoError,
 		},
 		{
 			desc: "k8s proxy running locally without public_addr",
@@ -136,7 +181,8 @@ func TestAuthSignKubeconfig(t *testing.T) {
 					PublicAddrs: []utils.NetAddr{{Addr: "proxy-from-config.example.com:3080"}},
 				}},
 			},
-			wantAddr: "https://proxy-from-config.example.com:3026",
+			wantAddr:  "https://proxy-from-config.example.com:3026",
+			assertErr: require.NoError,
 		},
 		{
 			desc: "k8s proxy from cluster info",
@@ -150,7 +196,8 @@ func TestAuthSignKubeconfig(t *testing.T) {
 					},
 				}},
 			},
-			wantAddr: "https://proxy-from-api.example.com:3026",
+			wantAddr:  "https://proxy-from-api.example.com:3026",
+			assertErr: require.NoError,
 		},
 		{
 			desc: "--kube-cluster specified with valid cluster",
@@ -166,6 +213,7 @@ func TestAuthSignKubeconfig(t *testing.T) {
 				}},
 			},
 			wantCluster: remoteCluster.GetMetadata().Name,
+			assertErr:   require.NoError,
 		},
 		{
 			desc: "--kube-cluster specified with invalid cluster",
@@ -180,19 +228,17 @@ func TestAuthSignKubeconfig(t *testing.T) {
 					},
 				}},
 			},
-			wantError: "couldn't find leaf cluster named \"doesnotexist.example.com\"",
+			assertErr: func(t require.TestingT, err error, _ ...interface{}) {
+				require.Error(t, err)
+				require.Equal(t, err.Error(), "couldn't find leaf cluster named \"doesnotexist.example.com\"")
+			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.desc, func(t *testing.T) {
 			// Generate kubeconfig.
-			if err = tt.ac.generateUserKeys(client); err != nil && tt.wantError == "" {
-				t.Fatalf("generating KubeProxyConfig: %v", err)
-			}
-
-			if tt.wantError != "" && (err == nil || err.Error() != tt.wantError) {
-				t.Errorf("got error %v, want %v", err, tt.wantError)
-			}
+			err := tt.ac.generateUserKeys(context.Background(), client)
+			tt.assertErr(t, err)
 
 			// Validate kubeconfig contents.
 			kc, err := kubeconfig.Load(tt.ac.output)
@@ -242,7 +288,7 @@ func (c *mockClient) GenerateUserCerts(ctx context.Context, userCertsReq proto.U
 	c.userCertsReq = &userCertsReq
 	return c.userCerts, nil
 }
-func (c *mockClient) GetCertAuthorities(types.CertAuthType, bool, ...services.MarshalOption) ([]types.CertAuthority, error) {
+func (c *mockClient) GetCertAuthorities(context.Context, types.CertAuthType, bool, ...services.MarshalOption) ([]types.CertAuthority, error) {
 	return c.cas, nil
 }
 func (c *mockClient) GetProxies() ([]types.Server, error) {
@@ -356,7 +402,7 @@ func TestCheckKubeCluster(t *testing.T) {
 				leafCluster:  tt.leafCluster,
 				outputFormat: tt.outputFormat,
 			}
-			err := a.checkKubeCluster(client)
+			err := a.checkKubeCluster(context.Background(), client)
 			tt.assertErr(t, err)
 			require.Equal(t, tt.want, a.kubeCluster)
 		})
@@ -399,6 +445,7 @@ func TestGenerateDatabaseKeys(t *testing.T) {
 		outKey         []byte
 		outCert        []byte
 		outCA          []byte
+		genKeyErrMsg   string
 	}{
 		{
 			name:           "database certificate",
@@ -457,6 +504,29 @@ func TestGenerateDatabaseKeys(t *testing.T) {
 			outCert:        certBytes,
 			outCA:          caBytes,
 		},
+		{
+			name:           "redis certificate",
+			inFormat:       identityfile.FormatRedis,
+			inHost:         "localhost,redis1,172.0.0.1",
+			inOutDir:       t.TempDir(),
+			inOutFile:      "db",
+			outSubject:     pkix.Name{CommonName: "localhost"},
+			outServerNames: []string{"localhost", "redis1", "172.0.0.1"},
+			outKeyFile:     "db.key",
+			outCertFile:    "db.crt",
+			outCAFile:      "db.cas",
+			outKey:         key.Priv,
+			outCert:        certBytes,
+			outCA:          caBytes,
+		},
+		{
+			name:         "missing host",
+			inFormat:     identityfile.FormatRedis,
+			inOutDir:     t.TempDir(),
+			inHost:       "", // missing host
+			inOutFile:    "db",
+			genKeyErrMsg: "at least one hostname must be specified",
+		},
 	}
 
 	for _, test := range tests {
@@ -469,8 +539,14 @@ func TestGenerateDatabaseKeys(t *testing.T) {
 				genTTL:        time.Hour,
 			}
 
-			err = ac.generateDatabaseKeysForKey(authClient, key)
-			require.NoError(t, err)
+			err = ac.generateDatabaseKeysForKey(context.Background(), authClient, key)
+			if test.genKeyErrMsg == "" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				require.Contains(t, err.Error(), test.genKeyErrMsg)
+				return
+			}
 
 			require.NotNil(t, authClient.dbCertsReq)
 			csr, err := tlsca.ParseCertificateRequestPEM(authClient.dbCertsReq.CSR)
@@ -576,7 +652,7 @@ func TestGenerateAppCertificates(t *testing.T) {
 				genTTL:        time.Hour,
 				appName:       tc.appName,
 			}
-			err = ac.generateUserKeys(authClient)
+			err = ac.generateUserKeys(context.Background(), authClient)
 			tc.assertErr(t, err)
 			if err != nil {
 				return

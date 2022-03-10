@@ -280,6 +280,8 @@ type CLIConf struct {
 	AWSRole string
 	// AWSCommandArgs contains arguments that will be forwarded to AWS CLI binary.
 	AWSCommandArgs []string
+	// AWSCLIMode defines the mode how AWS CLI is called.
+	AWSCLIMode string
 
 	// Reason is the reason for starting an ssh or kube session.
 	Reason string
@@ -423,6 +425,7 @@ func Run(args []string, opts ...cliOption) error {
 	aws := app.Command("aws", "Access AWS API.")
 	aws.Arg("command", "AWS command and subcommands arguments that are going to be forwarded to AWS CLI").StringsVar(&cf.AWSCommandArgs)
 	aws.Flag("app", "Optional Name of the AWS application to use if logged into multiple.").StringVar(&cf.AppName)
+	aws.Flag("mode", fmt.Sprintf("Local proxy mode for AWS CLI: %q to use --endpoint-url flag for AWS CLI, %q to use https_proxy environment variable", awsCLIModeEndpointURL, awsCLIModeHTTPSProxy)).Hidden().Default(awsCLIModeEndpointURL).StringVar(&cf.AWSCLIMode)
 
 	// Applications.
 	apps := app.Command("apps", "View and control proxied applications.").Alias("app")

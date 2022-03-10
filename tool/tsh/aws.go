@@ -84,14 +84,12 @@ func onAWS(cf *CLIConf) error {
 		}
 	}()
 
-	// Use "--endpoint-url" flag to force AWS CLI to connect to the local
-	// proxy.
 	endpointURL := url.URL{Scheme: "https", Host: lp.GetAddr()}
-	endpointFlag := fmt.Sprintf("--endpoint-url=%s", endpointURL.String())
+	if err := os.Setenv("https_proxy", endpointURL.String()); err != nil {
+		return trace.Wrap(err)
+	}
 
-	args := append([]string{}, cf.AWSCommandArgs...)
-	args = append(args, endpointFlag)
-	cmd := exec.Command(awsCLIBinaryName, args...)
+	cmd := exec.Command(awsCLIBinaryName, cf.AWSCommandArgs...)
 
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -114,7 +112,7 @@ func createLocalAWSProxy(cf *CLIConf, profile *client.ProfileStatus, awsApp stri
 		return nil, trace.Wrap(err)
 	}
 
-	localCert, err := getSelfSignedLocalCert(profile, awsApp, appX509Cert)
+	caCert, err := getSelfSignedLocalCert(profile, awsApp, appX509Cert)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -124,16 +122,12 @@ func createLocalAWSProxy(cf *CLIConf, profile *client.ProfileStatus, awsApp stri
 		return nil, trace.Wrap(err)
 	}
 
-	localAddress := fmt.Sprintf("%s:0", defaults.Localhost)
+	listenAddr := "localhost:0"
 	if cf.LocalProxyPort != "" {
-		localAddress = fmt.Sprintf("%s:%s", defaults.Localhost, cf.LocalProxyPort)
+		listenAddr = fmt.Sprintf("localhost:%s", cf.LocalProxyPort)
 	}
 
-	listener, err := tls.Listen("tcp", localAddress, &tls.Config{
-		Certificates: []tls.Certificate{
-			localCert,
-		},
-	})
+	listener, err := alpnproxy.NewHTTPSFowardProxyListener(listenAddr, caCert)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -427,3 +421,11 @@ func getAWSAppsName(apps []tlsca.RouteToApp) []string {
 	}
 	return out
 }
+
+const (
+	// AWSCLIModeEndpointURL is mode where --endpoint-url is passed to AWS
+	// CLI to forward the request to the local proxy.
+	awsCLIModeEndpointURL = "endpoint-url"
+
+	awsCLIModeHTTPSProxy = "https_proxy"
+)

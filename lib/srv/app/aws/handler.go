@@ -38,6 +38,7 @@ import (
 	"github.com/gravitational/teleport/lib/defaults"
 	appcommon "github.com/gravitational/teleport/lib/srv/app/common"
 	"github.com/gravitational/teleport/lib/tlsca"
+	libutils "github.com/gravitational/teleport/lib/utils"
 	awsutils "github.com/gravitational/teleport/lib/utils/aws"
 )
 
@@ -192,11 +193,38 @@ func resolveEndpoint(r *http.Request) (*endpoints.ResolvedEndpoint, error) {
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
+
+	if endpoint, ok := getAWSEndpointFromForwardedHost(r); ok {
+		return &endpoints.ResolvedEndpoint{
+			URL:           "https://" + endpoint,
+			SigningRegion: awsAuthHeader.Region,
+			SigningName:   awsAuthHeader.Service,
+		}, nil
+	}
+
 	resolvedEndpoint, err := endpoints.DefaultResolver().EndpointFor(awsAuthHeader.Service, awsAuthHeader.Region)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 	return &resolvedEndpoint, nil
+}
+
+// getAWSEndpointFromForwardedHost gets the host
+func getAWSEndpointFromForwardedHost(r *http.Request) (string, bool) {
+	host := r.Header.Get("X-Forwarded-Host")
+	if host == "" {
+		return "", false
+	}
+
+	// TODO(greedy52) check if host is a valid AWS endpoint.
+
+	if addr, err := libutils.ParseAddr(host); err != nil {
+		return "", false
+	} else if addr.IsLocal() {
+		return "", false
+	}
+
+	return host, true
 }
 
 // prepareSignedRequest creates a new HTTP request and rewrites the header from the original request and returns a new

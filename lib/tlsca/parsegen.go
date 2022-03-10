@@ -22,6 +22,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
@@ -182,6 +183,64 @@ func GenerateCertificateRequestPEM(subject pkix.Name, privateKeyBytes []byte) ([
 		Type:  "CERTIFICATE REQUEST",
 		Bytes: csrBytes,
 	}), nil
+}
+
+// GenerateAndSignCertificateForDomain generates a TLS certificate for the
+// specified domain and sign with provided CA.
+func GenerateAndSignCertificateForDomain(domain string, ca tls.Certificate) (*tls.Certificate, error) {
+	if len(ca.Certificate) == 0 {
+		return nil, trace.BadParameter("invalid certficate length")
+	}
+
+	caX509, err := x509.ParseCertificate(ca.Certificate[0])
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	subject := caX509.Subject
+	subject.CommonName = domain
+
+	template := &x509.Certificate{
+		SerialNumber: caX509.SerialNumber,
+		Subject:      subject,
+		NotBefore:    caX509.NotBefore,
+		NotAfter:     caX509.NotAfter,
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		DNSNames:     []string{domain},
+		IPAddresses:  caX509.IPAddresses,
+	}
+
+	if addr := net.ParseIP(domain); addr != nil {
+		template.DNSNames = caX509.DNSNames
+		template.IPAddresses = append(template.IPAddresses, addr)
+	}
+
+	certPrivKey, err := rsa.GenerateKey(rand.Reader, constants.RSAKeySize)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	certBytes, err := x509.CreateCertificate(rand.Reader, template, caX509, &certPrivKey.PublicKey, ca.PrivateKey)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	certPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: certBytes,
+	})
+
+	certPrivKeyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(certPrivKey),
+	})
+
+	cert, err := tls.X509KeyPair(certPEM, certPrivKeyPEM)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	return &cert, nil
 }
 
 // ParseCertificatePEM parses PEM-encoded certificate

@@ -594,7 +594,7 @@ func Run(args []string, opts ...cliOption) error {
 	shutdown, err := tracing.InitializeTraceProvider(cf.Context,
 		tracing.Config{
 			Service:     "tsh",
-			AgentAddr:   "172.16.27.131:4317",
+			AgentAddr:   os.Getenv("TELEPORT_TRACING_ADDR"),
 			SampleRatio: 1.0,
 		})
 	if err != nil {

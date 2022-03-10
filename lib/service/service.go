@@ -2035,7 +2035,7 @@ func (process *TeleportProcess) initTracing() error {
 
 	closeTracing, err := tracing.InitializeTraceProvider(process.ExitContext(), tracing.Config{
 		Service:     "teleport",
-		AgentAddr:   "172.16.27.131:4317",
+		AgentAddr:   os.Getenv("TELEPORT_TRACING_ADDR"),
 		Attributes:  attrs,
 		SampleRatio: 1.0,
 	})

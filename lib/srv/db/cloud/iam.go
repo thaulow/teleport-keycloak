@@ -52,6 +52,7 @@ type IAM struct {
 	cfg         IAMConfig
 	log         logrus.FieldLogger
 	awsIdentity aws.Identity
+	awsPolicy   *awsPolicy
 	mu          sync.RWMutex
 }
 
@@ -90,28 +91,66 @@ func (c *IAM) Teardown(ctx context.Context, database types.Database) error {
 	return nil
 }
 
+// TODO
+func (c *IAM) Close() error {
+	ctx := context.Background()
+
+	awsPolicy, err := c.getAWSPolicy(ctx)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	err = awsPolicy.detachIAMPolicy(ctx)
+	if err != nil {
+		if !trace.IsNotFound(err) {
+			return trace.Wrap(err)
+		}
+	}
+
+	return nil
+}
+
 // getAWSConfigurator returns configurator instance for the provided database.
 func (c *IAM) getAWSConfigurator(ctx context.Context, database types.Database) (*awsClient, error) {
-	identity, err := c.getAWSIdentity(ctx)
+	awsPolicy, err := c.getAWSPolicy(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 	return newAWS(ctx, awsConfig{
-		clients:  c.cfg.Clients,
-		identity: identity,
-		database: database,
-		hostID:   c.cfg.HostID,
+		clients:   c.cfg.Clients,
+		database:  database,
+		awsPolicy: awsPolicy,
 	})
+}
+
+// getAWSPolicy TODO
+func (c *IAM) getAWSPolicy(ctx context.Context) (*awsPolicy, error) {
+	c.mu.RLock()
+	if c.awsPolicy != nil {
+		defer c.mu.RUnlock()
+		return c.awsPolicy, nil
+	}
+	c.mu.RUnlock()
+
+	identity, err := c.getAWSIdentity(ctx)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	policy, err := newAWSPolicy(awsPolicyConfig{
+		clients:  c.cfg.Clients,
+		hostID:   c.cfg.HostID,
+		identity: identity,
+	})
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.awsPolicy = policy
+	return c.awsPolicy, nil
 }
 
 // getAWSIdentity returns this process' AWS identity.
 func (c *IAM) getAWSIdentity(ctx context.Context) (aws.Identity, error) {
-	c.mu.RLock()
-	if c.awsIdentity != nil {
-		defer c.mu.RUnlock()
-		return c.awsIdentity, nil
-	}
-	c.mu.RUnlock()
 	sts, err := c.cfg.Clients.GetAWSSTSClient("")
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -120,8 +159,5 @@ func (c *IAM) getAWSIdentity(ctx context.Context) (aws.Identity, error) {
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.awsIdentity = awsIdentity
-	return c.awsIdentity, nil
+	return awsIdentity, nil
 }

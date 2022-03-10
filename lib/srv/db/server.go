@@ -592,6 +592,11 @@ func (s *Server) Close() error {
 	if s.watcher != nil {
 		s.watcher.Close()
 	}
+
+	if err = s.cfg.CloudIAM.Close(); err != nil {
+		errors = append(errors, err)
+	}
+
 	// Close all cloud clients.
 	errors = append(errors, s.cfg.Auth.Close())
 	return trace.NewAggregate(errors...)

@@ -35,16 +35,64 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// awsConfig is the config for the client that configures IAM for AWS databases.
-type awsConfig struct {
+// TODO
+type awsPolicy struct {
+	cfg awsPolicyConfig
+	// iam is the IAM API client.
+	iam iamiface.IAMAPI
+	// log is the logrus logger.
+	log logrus.FieldLogger
+}
+
+// TODO
+type awsPolicyConfig struct {
 	// clients is an interface for creating AWS clients.
 	clients common.CloudClients
 	// identity is AWS identity this database agent is running as.
 	identity awslib.Identity
-	// database is the database instance to configure.
-	database types.Database
 	// hostID is the host identifier where this agent's running.
 	hostID string
+}
+
+// Check validates the config.
+func (c *awsPolicyConfig) Check() error {
+	if c.clients == nil {
+		return trace.BadParameter("missing parameter clients")
+	}
+	if c.identity == nil {
+		return trace.BadParameter("missing parameter identity")
+	}
+	if c.hostID == "" {
+		return trace.BadParameter("missing parameter host ID")
+	}
+	return nil
+}
+
+func newAWSPolicy(config awsPolicyConfig) (*awsPolicy, error) {
+	if err := config.Check(); err != nil {
+		return nil, trace.Wrap(err)
+	}
+	iam, err := config.clients.GetAWSIAMClient()
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	return &awsPolicy{
+		cfg: config,
+		iam: iam,
+		log: logrus.WithFields(logrus.Fields{
+			trace.Component: "aws",
+		}),
+	}, nil
+}
+
+// awsConfig is the config for the client that configures IAM for AWS databases.
+type awsConfig struct {
+	// clients is an interface for creating AWS clients.
+	clients common.CloudClients
+	// database is the database instance to configure.
+	database types.Database
+	// TODO
+	awsPolicy *awsPolicy
 }
 
 // Check validates the config.
@@ -52,14 +100,11 @@ func (c *awsConfig) Check() error {
 	if c.clients == nil {
 		return trace.BadParameter("missing parameter clients")
 	}
-	if c.identity == nil {
-		return trace.BadParameter("missing parameter identity")
-	}
 	if c.database == nil {
 		return trace.BadParameter("missing parameter database")
 	}
-	if c.hostID == "" {
-		return trace.BadParameter("missing parameter host ID")
+	if c.awsPolicy == nil {
+		return trace.BadParameter("missing parameter awsPolicy")
 	}
 	return nil
 }
@@ -69,18 +114,15 @@ func newAWS(ctx context.Context, config awsConfig) (*awsClient, error) {
 	if err := config.Check(); err != nil {
 		return nil, trace.Wrap(err)
 	}
+
 	rds, err := config.clients.GetAWSRDSClient(config.database.GetAWS().Region)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	iam, err := config.clients.GetAWSIAMClient(config.database.GetAWS().Region)
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
 	return &awsClient{
-		cfg: config,
-		rds: rds,
-		iam: iam,
+		awsPolicy: config.awsPolicy,
+		cfg:       config,
+		rds:       rds,
 		log: logrus.WithFields(logrus.Fields{
 			trace.Component: "aws",
 			"db":            config.database.GetName(),
@@ -89,9 +131,10 @@ func newAWS(ctx context.Context, config awsConfig) (*awsClient, error) {
 }
 
 type awsClient struct {
+	*awsPolicy
+
 	cfg awsConfig
 	rds rdsiface.RDSAPI
-	iam iamiface.IAMAPI
 	log logrus.FieldLogger
 }
 
@@ -211,7 +254,7 @@ func (r *awsClient) deleteIAMPolicy(ctx context.Context) error {
 }
 
 // getIAMPolicy fetches and returns this agent's parsed IAM policy document.
-func (r *awsClient) getIAMPolicy(ctx context.Context) (*awslib.PolicyDocument, error) {
+func (r *awsPolicy) getIAMPolicy(ctx context.Context) (*awslib.PolicyDocument, error) {
 	var policyDocument string
 	switch r.cfg.identity.(type) {
 	case awslib.Role:
@@ -245,7 +288,7 @@ func (r *awsClient) getIAMPolicy(ctx context.Context) (*awslib.PolicyDocument, e
 }
 
 // updateIAMPolicy attaches IAM access policy to the identity this agent is running as.
-func (r *awsClient) updateIAMPolicy(ctx context.Context, policy *awslib.PolicyDocument) error {
+func (r *awsPolicy) updateIAMPolicy(ctx context.Context, policy *awslib.PolicyDocument) error {
 	r.log.Debugf("Updating IAM policy for %v.", r.cfg.identity)
 	document, err := json.Marshal(policy)
 	if err != nil {
@@ -271,7 +314,7 @@ func (r *awsClient) updateIAMPolicy(ctx context.Context, policy *awslib.PolicyDo
 }
 
 // detachIAMPolicy detaches IAM access policy from the identity this agent is running as.
-func (r *awsClient) detachIAMPolicy(ctx context.Context) error {
+func (r *awsPolicy) detachIAMPolicy(ctx context.Context) error {
 	r.log.Debugf("Detaching IAM policy from %v.", r.cfg.identity)
 	var err error
 	switch r.cfg.identity.(type) {
@@ -292,6 +335,6 @@ func (r *awsClient) detachIAMPolicy(ctx context.Context) error {
 }
 
 // policyName is the inline IAM policy name this agent is managing.
-func (r *awsClient) policyName() string {
+func (r *awsPolicy) policyName() string {
 	return fmt.Sprintf("teleport-%v", r.cfg.hostID)
 }

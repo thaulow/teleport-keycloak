@@ -193,7 +193,7 @@ func connectToAuthService(ctx context.Context, cfg *service.Config, clientConfig
 	log.Debugf("Connecting to auth servers: %v.", cfg.AuthServers)
 
 	// Try connecting to the auth server directly over TLS.
-	client, err := auth.NewClient(apiclient.Config{
+	client, err := auth.NewClient(ctx, apiclient.Config{
 		Addrs: utils.NetAddrsToStrings(cfg.AuthServers),
 		Credentials: []apiclient.Credentials{
 			apiclient.LoadTLS(clientConfig.TLS),
@@ -231,7 +231,7 @@ func connectToAuthService(ctx context.Context, cfg *service.Config, clientConfig
 		log.Debugf("Attempting to connect using reverse tunnel address %v.", tunAddr)
 		// reversetunnel.TunnelAuthDialer will take care of creating a net.Conn
 		// within an SSH tunnel.
-		client, err = auth.NewClient(apiclient.Config{
+		client, err = auth.NewClient(ctx, apiclient.Config{
 			Dialer: &reversetunnel.TunnelAuthDialer{
 				ProxyAddr:    tunAddr,
 				ClientConfig: clientConfig.SSH,

@@ -908,7 +908,7 @@ func (process *TeleportProcess) findReverseTunnel(addrs []utils.NetAddr) (string
 }
 
 func (process *TeleportProcess) newClientThroughTunnel(proxyAddr string, tlsConfig *tls.Config, sshConfig *ssh.ClientConfig) (*auth.Client, error) {
-	clt, err := auth.NewClient(apiclient.Config{
+	clt, err := auth.NewClient(process.ExitContext(), apiclient.Config{
 		Dialer: &reversetunnel.TunnelAuthDialer{
 			ProxyAddr:    proxyAddr,
 			ClientConfig: sshConfig,
@@ -940,7 +940,7 @@ func (process *TeleportProcess) newClientDirect(authServers []utils.NetAddr, tls
 		cltParams = []roundtrip.ClientParam{auth.ClientTimeout(process.Config.ClientTimeout)}
 	}
 
-	clt, err := auth.NewClient(apiclient.Config{
+	clt, err := auth.NewClient(process.ExitContext(), apiclient.Config{
 		Addrs: utils.NetAddrsToStrings(authServers),
 		Credentials: []apiclient.Credentials{
 			apiclient.LoadTLS(tlsConfig),

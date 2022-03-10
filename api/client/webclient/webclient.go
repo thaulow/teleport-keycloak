@@ -168,7 +168,12 @@ func GetMOTD(ctx context.Context, proxyAddr string, insecure bool, pool *x509.Ce
 
 	endpoint := fmt.Sprintf("https://%s/webapi/motd", proxyAddr)
 
-	resp, err := clt.Get(endpoint)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	resp, err := clt.Do(req)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

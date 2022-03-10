@@ -45,6 +45,7 @@ import (
 	"github.com/gravitational/teleport/lib/services"
 	"github.com/gravitational/teleport/lib/session"
 	"github.com/gravitational/teleport/lib/utils"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/gravitational/roundtrip"
 	"github.com/gravitational/trace"
@@ -88,9 +89,9 @@ var _ ClientI = &Client{}
 // NOTE: This client is being deprecated in favor of the gRPC Client in
 // teleport/api/client. This Client should only be used internally, or for
 // functionality that hasn't been ported to the new client yet.
-func NewClient(cfg client.Config, params ...roundtrip.ClientParam) (*Client, error) {
+func NewClient(ctx context.Context, cfg client.Config, params ...roundtrip.ClientParam) (*Client, error) {
 	cfg.DialInBackground = true
-	apiClient, err := client.New(context.TODO(), cfg)
+	apiClient, err := client.New(ctx, cfg)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -183,7 +184,7 @@ func NewHTTPClient(cfg client.Config, tls *tls.Config, params ...roundtrip.Clien
 
 	clientParams := append(
 		[]roundtrip.ClientParam{
-			roundtrip.HTTPClient(&http.Client{Transport: transport}),
+			roundtrip.HTTPClient(&http.Client{Transport: otelhttp.NewTransport(transport)}),
 			roundtrip.SanitizerEnabled(true),
 		},
 		params...,
@@ -231,23 +232,6 @@ type ClientConfig struct {
 	KeepAliveCount int
 	// TLS is the client's TLS config
 	TLS *tls.Config
-}
-
-// NewTLSClient returns a new TLS client that uses mutual TLS authentication
-// and dials the remote server using dialer.
-// DELETE IN: 7.0.0.
-func NewTLSClient(cfg ClientConfig, params ...roundtrip.ClientParam) (*Client, error) {
-	c := client.Config{
-		Addrs:           utils.NetAddrsToStrings(cfg.Addrs),
-		Dialer:          cfg.Dialer,
-		DialTimeout:     cfg.DialTimeout,
-		KeepAlivePeriod: cfg.KeepAlivePeriod,
-		KeepAliveCount:  cfg.KeepAliveCount,
-		Credentials: []client.Credentials{
-			client.LoadTLS(cfg.TLS),
-		},
-	}
-	return NewClient(c, params...)
 }
 
 // EncodeClusterName encodes cluster name in the SNI hostname

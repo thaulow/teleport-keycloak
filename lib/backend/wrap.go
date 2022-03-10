@@ -66,7 +66,7 @@ func (s *Wrapper) SetReadError(err error) {
 // GetRange returns query range
 func (s *Wrapper) GetRange(ctx context.Context, startKey []byte, endKey []byte, limit int) (*GetResult, error) {
 	ctx, span := s.tr.Start(ctx,
-		"GetRange",
+		"Backend/GetRange",
 		oteltrace.WithAttributes(
 			attribute.String("startKey", string(startKey)),
 			attribute.String("endKey", string(endKey)),
@@ -85,7 +85,7 @@ func (s *Wrapper) GetRange(ctx context.Context, startKey []byte, endKey []byte, 
 func (s *Wrapper) Create(ctx context.Context, i Item) (*Lease, error) {
 	ctx, span := s.tr.Start(
 		ctx,
-		"Create",
+		"Backend/Create",
 		oteltrace.WithAttributes(
 			attribute.String("key", string(i.Key)),
 		),
@@ -99,7 +99,7 @@ func (s *Wrapper) Create(ctx context.Context, i Item) (*Lease, error) {
 // exists, updates it otherwise)
 func (s *Wrapper) Put(ctx context.Context, i Item) (*Lease, error) {
 	ctx, span := s.tr.Start(ctx,
-		"Put",
+		"Backend/Put",
 		oteltrace.WithAttributes(
 			attribute.String("key", string(i.Key)),
 		),
@@ -112,7 +112,7 @@ func (s *Wrapper) Put(ctx context.Context, i Item) (*Lease, error) {
 // Update updates value in the backend
 func (s *Wrapper) Update(ctx context.Context, i Item) (*Lease, error) {
 	ctx, span := s.tr.Start(ctx,
-		"Update",
+		"Backend/Update",
 		oteltrace.WithAttributes(
 			attribute.String("key", string(i.Key)),
 		),
@@ -125,7 +125,7 @@ func (s *Wrapper) Update(ctx context.Context, i Item) (*Lease, error) {
 // Get returns a single item or not found error
 func (s *Wrapper) Get(ctx context.Context, key []byte) (*Item, error) {
 	ctx, span := s.tr.Start(ctx,
-		"Get",
+		"Backend/Get",
 		oteltrace.WithAttributes(
 			attribute.String("key", string(key)),
 		),
@@ -142,7 +142,7 @@ func (s *Wrapper) Get(ctx context.Context, key []byte) (*Item, error) {
 // and replaces is with replaceWith item
 func (s *Wrapper) CompareAndSwap(ctx context.Context, expected Item, replaceWith Item) (*Lease, error) {
 	ctx, span := s.tr.Start(ctx,
-		"CompareAndSwap",
+		"Backend/CompareAndSwap",
 		oteltrace.WithAttributes(
 			attribute.String("key", string(expected.Key)),
 		),
@@ -155,7 +155,7 @@ func (s *Wrapper) CompareAndSwap(ctx context.Context, expected Item, replaceWith
 // Delete deletes item by key
 func (s *Wrapper) Delete(ctx context.Context, key []byte) error {
 	ctx, span := s.tr.Start(ctx,
-		"Delete",
+		"Backend/Delete",
 		oteltrace.WithAttributes(
 			attribute.String("key", string(key)),
 		),
@@ -169,7 +169,7 @@ func (s *Wrapper) Delete(ctx context.Context, key []byte) error {
 func (s *Wrapper) DeleteRange(ctx context.Context, startKey []byte, endKey []byte) error {
 	ctx, span := s.tr.Start(
 		ctx,
-		"DeleteRange",
+		"Backend/DeleteRange",
 		oteltrace.WithAttributes(
 			attribute.String("startKey", string(startKey)),
 			attribute.String("endKey", string(endKey)),
@@ -187,7 +187,7 @@ func (s *Wrapper) DeleteRange(ctx context.Context, startKey []byte, endKey []byt
 func (s *Wrapper) KeepAlive(ctx context.Context, lease Lease, expires time.Time) error {
 	ctx, span := s.tr.Start(
 		ctx,
-		"KeepAlive",
+		"Backend/KeepAlive",
 		oteltrace.WithAttributes(
 			attribute.String("key", string(lease.Key)),
 			attribute.String("expires", expires.String()),
@@ -200,7 +200,7 @@ func (s *Wrapper) KeepAlive(ctx context.Context, lease Lease, expires time.Time)
 
 // NewWatcher returns a new event watcher
 func (s *Wrapper) NewWatcher(ctx context.Context, watch Watch) (Watcher, error) {
-	ctx, span := s.tr.Start(ctx, "NewWatcher")
+	ctx, span := s.tr.Start(ctx, "Backend/NewWatcher")
 	defer span.End()
 
 	if err := s.GetReadError(); err != nil {
@@ -227,7 +227,7 @@ func (s *Wrapper) Clock() clockwork.Clock {
 
 // Migrate runs the necessary data migrations for this backend.
 func (s *Wrapper) Migrate(ctx context.Context) error {
-	ctx, span := s.tr.Start(ctx, "Migrate")
+	ctx, span := s.tr.Start(ctx, "Backend/Migrate")
 	defer span.End()
 
 	return s.backend.Migrate(ctx)

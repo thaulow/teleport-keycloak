@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
 	oteltrace "go.opentelemetry.io/otel/trace"
 	"golang.org/x/crypto/ssh"
@@ -77,6 +78,9 @@ type NodeClient struct {
 }
 
 func (proxy *ProxyClient) NewSession(ctx context.Context) (*ssh.Session, error) {
+	ctx, span := proxy.tr.Start(ctx, "NewSession")
+	defer span.End()
+
 	session, err := proxy.Client.NewSession()
 	if err != nil {
 		return nil, err
@@ -98,6 +102,9 @@ func (proxy *ProxyClient) NewSession(ctx context.Context) (*ssh.Session, error) 
 // Each site is returned as an instance of its auth server
 //
 func (proxy *ProxyClient) GetSites(ctx context.Context) ([]types.Site, error) {
+	ctx, span := proxy.tr.Start(ctx, "GetSites")
+	defer span.End()
+
 	proxySession, err := proxy.NewSession(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -139,6 +146,9 @@ func (proxy *ProxyClient) GetSites(ctx context.Context) ([]types.Site, error) {
 
 // GetLeafClusters returns the leaf/remote clusters.
 func (proxy *ProxyClient) GetLeafClusters(ctx context.Context) ([]types.RemoteCluster, error) {
+	ctx, span := proxy.tr.Start(ctx, "GetLeafClusters")
+	defer span.End()
+
 	clt, err := proxy.ConnectToRootCluster(ctx, false)
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -238,6 +248,9 @@ const (
 // ReissueUserCerts generates certificates for the user
 // that have a metadata instructing server to route the requests to the cluster
 func (proxy *ProxyClient) ReissueUserCerts(ctx context.Context, cachePolicy CertCachePolicy, params ReissueParams) error {
+	ctx, span := proxy.tr.Start(ctx, "ReissueUserCerts")
+	defer span.End()
+
 	key, err := proxy.reissueUserCerts(ctx, cachePolicy, params)
 	if err != nil {
 		return trace.Wrap(err)
@@ -344,6 +357,9 @@ type PromptMFAChallengeHandler func(ctx context.Context, proxyAddr string, c *pr
 
 // IssueUserCertsWithMFA generates a single-use certificate for the user.
 func (proxy *ProxyClient) IssueUserCertsWithMFA(ctx context.Context, params ReissueParams, promptMFAChallenge PromptMFAChallengeHandler) (*Key, error) {
+	ctx, span := proxy.tr.Start(ctx, "IssueUserCertsWithMFA")
+	defer span.End()
+
 	if params.RouteToCluster == "" {
 		params.RouteToCluster = proxy.siteName
 	}
@@ -519,6 +535,9 @@ func (proxy *ProxyClient) RootClusterName() (string, error) {
 
 // CreateAccessRequest registers a new access request with the auth server.
 func (proxy *ProxyClient) CreateAccessRequest(ctx context.Context, req types.AccessRequest) error {
+	ctx, span := proxy.tr.Start(ctx, "CreateAccessRequest")
+	defer span.End()
+
 	site, err := proxy.ConnectToCurrentCluster(ctx, false)
 	if err != nil {
 		return trace.Wrap(err)
@@ -528,6 +547,9 @@ func (proxy *ProxyClient) CreateAccessRequest(ctx context.Context, req types.Acc
 
 // GetAccessRequests loads all access requests matching the spupplied filter.
 func (proxy *ProxyClient) GetAccessRequests(ctx context.Context, filter types.AccessRequestFilter) ([]types.AccessRequest, error) {
+	ctx, span := proxy.tr.Start(ctx, "GetAccessRequests")
+	defer span.End()
+
 	site, err := proxy.ConnectToCurrentCluster(ctx, false)
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -541,6 +563,9 @@ func (proxy *ProxyClient) GetAccessRequests(ctx context.Context, filter types.Ac
 
 // GetRole loads a role resource by name.
 func (proxy *ProxyClient) GetRole(ctx context.Context, name string) (types.Role, error) {
+	ctx, span := proxy.tr.Start(ctx, "GetRole")
+	defer span.End()
+
 	site, err := proxy.ConnectToCurrentCluster(ctx, false)
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -554,6 +579,9 @@ func (proxy *ProxyClient) GetRole(ctx context.Context, name string) (types.Role,
 
 // NewWatcher sets up a new event watcher.
 func (proxy *ProxyClient) NewWatcher(ctx context.Context, watch types.Watch) (types.Watcher, error) {
+	ctx, span := proxy.tr.Start(ctx, "NewWatcher")
+	defer span.End()
+
 	site, err := proxy.ConnectToCurrentCluster(ctx, false)
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -571,6 +599,9 @@ func (proxy *ProxyClient) NewWatcher(ctx context.Context, watch types.Watch) (ty
 // A server is matched when ALL labels match.
 // If no labels are passed, ALL nodes are returned.
 func (proxy *ProxyClient) FindServersByLabels(ctx context.Context, namespace string, labels map[string]string) ([]types.Server, error) {
+	ctx, span := proxy.tr.Start(ctx, "FindServerByLabels", oteltrace.WithAttributes(attribute.String("namespace", namespace)))
+	defer span.End()
+
 	if namespace == "" {
 		return nil, trace.BadParameter(auth.MissingNamespaceError)
 	}
@@ -583,6 +614,9 @@ func (proxy *ProxyClient) FindServersByLabels(ctx context.Context, namespace str
 
 // GetAppServers returns a list of application servers.
 func (proxy *ProxyClient) GetAppServers(ctx context.Context, namespace string) ([]types.Server, error) {
+	ctx, span := proxy.tr.Start(ctx, "GetAppServers")
+	defer span.End()
+
 	authClient, err := proxy.CurrentClusterAccessPoint(ctx, false)
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -598,6 +632,9 @@ func (proxy *ProxyClient) GetAppServers(ctx context.Context, namespace string) (
 
 // CreateAppSession creates a new application access session.
 func (proxy *ProxyClient) CreateAppSession(ctx context.Context, req types.CreateAppSessionRequest) (types.WebSession, error) {
+	ctx, span := proxy.tr.Start(ctx, "CreateAppSession")
+	defer span.End()
+
 	clusterName, err := proxy.RootClusterName()
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -624,6 +661,9 @@ func (proxy *ProxyClient) CreateAppSession(ctx context.Context, req types.Create
 
 // DeleteAppSession removes the specified application access session.
 func (proxy *ProxyClient) DeleteAppSession(ctx context.Context, sessionID string) error {
+	ctx, span := proxy.tr.Start(ctx, "DeleteAppSession")
+	defer span.End()
+
 	authClient, err := proxy.ConnectToRootCluster(ctx, true)
 	if err != nil {
 		return trace.Wrap(err)
@@ -637,6 +677,9 @@ func (proxy *ProxyClient) DeleteAppSession(ctx context.Context, sessionID string
 
 // GetDatabaseServers returns all registered database proxy servers.
 func (proxy *ProxyClient) GetDatabaseServers(ctx context.Context, namespace string) ([]types.DatabaseServer, error) {
+	ctx, span := proxy.tr.Start(ctx, "GetDatabaseServers")
+	defer span.End()
+
 	authClient, err := proxy.CurrentClusterAccessPoint(ctx, false)
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -652,6 +695,9 @@ func (proxy *ProxyClient) GetDatabaseServers(ctx context.Context, namespace stri
 // selected cluster and is used for discovery
 // and could be cached based on the access policy
 func (proxy *ProxyClient) CurrentClusterAccessPoint(ctx context.Context, quiet bool) (auth.AccessPoint, error) {
+	ctx, span := proxy.tr.Start(ctx, "CurrentClusterAccessPoint")
+	defer span.End()
+
 	// get the current cluster:
 	cluster, err := proxy.currentCluster(ctx)
 	if err != nil {
@@ -663,6 +709,9 @@ func (proxy *ProxyClient) CurrentClusterAccessPoint(ctx context.Context, quiet b
 // ClusterAccessPoint returns cluster access point used for discovery
 // and could be cached based on the access policy
 func (proxy *ProxyClient) ClusterAccessPoint(ctx context.Context, clusterName string, quiet bool) (auth.AccessPoint, error) {
+	ctx, span := proxy.tr.Start(ctx, "ClusterAccessPoint")
+	defer span.End()
+
 	if clusterName == "" {
 		return nil, trace.BadParameter("parameter clusterName is missing")
 	}
@@ -679,6 +728,9 @@ func (proxy *ProxyClient) ClusterAccessPoint(ctx context.Context, clusterName st
 // if 'quiet' is set to true, no errors will be printed to stdout, otherwise
 // any connection errors are visible to a user.
 func (proxy *ProxyClient) ConnectToCurrentCluster(ctx context.Context, quiet bool) (auth.ClientI, error) {
+	ctx, span := proxy.tr.Start(ctx, "ConnectToCurrentCluster")
+	defer span.End()
+
 	cluster, err := proxy.currentCluster(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -692,6 +744,9 @@ func (proxy *ProxyClient) ConnectToCurrentCluster(ctx context.Context, quiet boo
 // if 'quiet' is set to true, no errors will be printed to stdout, otherwise
 // any connection errors are visible to a user.
 func (proxy *ProxyClient) ConnectToRootCluster(ctx context.Context, quiet bool) (auth.ClientI, error) {
+	ctx, span := proxy.tr.Start(ctx, "ConnectToRootCluster")
+	defer span.End()
+
 	clusterName, err := proxy.RootClusterName()
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -705,12 +760,18 @@ func (proxy *ProxyClient) ConnectToRootCluster(ctx context.Context, quiet bool) 
 // if 'quiet' is set to true, no errors will be printed to stdout, otherwise
 // any connection errors are visible to a user.
 func (proxy *ProxyClient) ConnectToCluster(ctx context.Context, clusterName string, quiet bool) (auth.ClientI, error) {
-	dialer := client.ContextDialerFunc(func(ctx context.Context, network, _ string) (net.Conn, error) {
-		return proxy.dialAuthServer(ctx, clusterName)
+	ctx, span := proxy.tr.Start(ctx, "ConnectToCluster")
+	defer span.End()
+
+	dialer := client.ContextDialerFunc(func(in context.Context, network, _ string) (net.Conn, error) {
+		// We need ContextWithRemoteSpanContext here because ctx is not a parent of
+		// in. Without this the spans aren't correlated.
+		in = oteltrace.ContextWithRemoteSpanContext(in, span.SpanContext())
+		return proxy.dialAuthServer(in, clusterName)
 	})
 
 	if proxy.teleportClient.SkipLocalAuth {
-		return auth.NewClient(client.Config{
+		return auth.NewClient(ctx, client.Config{
 			Dialer: dialer,
 			Credentials: []client.Credentials{
 				client.LoadTLS(proxy.teleportClient.TLS),
@@ -727,7 +788,7 @@ func (proxy *ProxyClient) ConnectToCluster(ctx context.Context, clusterName stri
 		return nil, trace.Wrap(err, "failed to generate client TLS config")
 	}
 	tlsConfig.InsecureSkipVerify = proxy.teleportClient.InsecureSkipVerify
-	clt, err := auth.NewClient(client.Config{
+	clt, err := auth.NewClient(ctx, client.Config{
 		Dialer: dialer,
 		Credentials: []client.Credentials{
 			client.LoadTLS(tlsConfig),
@@ -799,6 +860,9 @@ func (proxy *ProxyClient) isRecordingProxy() (bool, error) {
 
 // dialAuthServer returns auth server connection forwarded via proxy
 func (proxy *ProxyClient) dialAuthServer(ctx context.Context, clusterName string) (net.Conn, error) {
+	ctx, span := proxy.tr.Start(ctx, "dialAuthServer")
+	defer span.End()
+
 	log.Debugf("Client %v is connecting to auth server on cluster %q.", proxy.clientAddr, clusterName)
 
 	address := "@" + clusterName
@@ -904,6 +968,16 @@ func requestSubsystem(ctx context.Context, session *ssh.Session, name string) er
 // ConnectToNode connects to the ssh server via Proxy.
 // It returns connected and authenticated NodeClient
 func (proxy *ProxyClient) ConnectToNode(ctx context.Context, nodeAddress NodeAddr, user string, quiet bool) (*NodeClient, error) {
+	ctx, span := proxy.tr.Start(
+		ctx,
+		"ConnectToNode",
+		oteltrace.WithAttributes(
+			attribute.String("node_address", nodeAddress.String()),
+			attribute.String("user", user),
+		),
+	)
+	defer span.End()
+
 	log.Infof("Client=%v connecting to node=%v", proxy.clientAddr, nodeAddress)
 	if len(proxy.teleportClient.JumpHosts) > 0 {
 		return proxy.PortForwardToNode(ctx, nodeAddress, user, quiet)
@@ -1035,6 +1109,9 @@ func (proxy *ProxyClient) ConnectToNode(ctx context.Context, nodeAddress NodeAdd
 // PortForwardToNode connects to the ssh server via Proxy
 // It returns connected and authenticated NodeClient
 func (proxy *ProxyClient) PortForwardToNode(ctx context.Context, nodeAddress NodeAddr, user string, quiet bool) (*NodeClient, error) {
+	ctx, span := proxy.tr.Start(ctx, "PortForwardToNode")
+	defer span.End()
+
 	log.Infof("Client=%v jumping to node=%s", proxy.clientAddr, nodeAddress)
 
 	authMethods, err := proxy.sessionSSHCertificate(ctx, nodeAddress)
@@ -1448,6 +1525,9 @@ func (c *NodeClient) Close() error {
 
 // currentCluster returns the connection to the API of the current cluster
 func (proxy *ProxyClient) currentCluster(ctx context.Context) (*types.Site, error) {
+	ctx, span := proxy.tr.Start(ctx, "currentCluster")
+	defer span.End()
+
 	sites, err := proxy.GetSites(ctx)
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -1467,6 +1547,9 @@ func (proxy *ProxyClient) currentCluster(ctx context.Context) (*types.Site, erro
 }
 
 func (proxy *ProxyClient) sessionSSHCertificate(ctx context.Context, nodeAddr NodeAddr) ([]ssh.AuthMethod, error) {
+	ctx, span := proxy.tr.Start(ctx, "sessionSSHCertificate")
+	defer span.End()
+
 	if _, err := proxy.teleportClient.localAgent.GetKey(nodeAddr.Cluster); err != nil {
 		if trace.IsNotFound(err) {
 			// Either running inside the web UI in a proxy or using an identity

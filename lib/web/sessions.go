@@ -251,7 +251,7 @@ func (c *SessionContext) newRemoteTLSClient(ctx context.Context, cluster reverse
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	return auth.NewClient(apiclient.Config{
+	return auth.NewClient(ctx, apiclient.Config{
 		Dialer: clusterDialer(cluster),
 		Credentials: []apiclient.Credentials{
 			apiclient.LoadTLS(tlsConfig),
@@ -793,7 +793,7 @@ func (s *sessionCache) newSessionContextFromSession(ctx context.Context, session
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	userClient, err := auth.NewClient(apiclient.Config{
+	userClient, err := auth.NewClient(ctx, apiclient.Config{
 		Addrs:       utils.NetAddrsToStrings(s.authServers),
 		Credentials: []apiclient.Credentials{apiclient.LoadTLS(tlsConfig)},
 	})

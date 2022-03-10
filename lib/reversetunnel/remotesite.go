@@ -108,7 +108,7 @@ func (s *remoteSite) getRemoteClient(ctx context.Context) (auth.ClientI, bool, e
 		// connecting to the remote one (it is used to find the right certificate
 		// authority to verify)
 		tlsConfig.ServerName = auth.EncodeClusterName(s.srv.ClusterName)
-		clt, err := auth.NewClient(client.Config{
+		clt, err := auth.NewClient(ctx, client.Config{
 			Dialer: client.ContextDialerFunc(s.authServerContextDialer),
 			Credentials: []client.Credentials{
 				client.LoadTLS(tlsConfig),

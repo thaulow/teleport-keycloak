@@ -520,7 +520,7 @@ func (a *TestAuthServer) NewRemoteClient(identity TestIdentity, addr net.Addr, p
 	tlsConfig.ServerName = EncodeClusterName(a.ClusterName)
 	tlsConfig.Time = a.AuthServer.clock.Now
 
-	return NewClient(client.Config{
+	return NewClient(context.Background(), client.Config{
 		Addrs: []string{addr.String()},
 		Credentials: []client.Credentials{
 			client.LoadTLS(tlsConfig),
@@ -707,7 +707,7 @@ func (t *TestTLSServer) NewClientFromWebSession(sess types.WebSession) (*Client,
 	tlsConfig.Certificates = []tls.Certificate{tlsCert}
 	tlsConfig.Time = t.AuthServer.AuthServer.clock.Now
 
-	return NewClient(client.Config{
+	return NewClient(context.Background(), client.Config{
 		Addrs: []string{t.Addr().String()},
 		Credentials: []client.Credentials{
 			client.LoadTLS(tlsConfig),
@@ -748,7 +748,7 @@ func (t *TestTLSServer) ClientTLSConfig(identity TestIdentity) (*tls.Config, err
 // CloneClient uses the same credentials as the passed client
 // but forces the client to be recreated
 func (t *TestTLSServer) CloneClient(clt *Client) *Client {
-	newClient, err := NewClient(client.Config{
+	newClient, err := NewClient(context.Background(), client.Config{
 		Addrs: []string{t.Addr().String()},
 		Credentials: []client.Credentials{
 			client.LoadTLS(clt.Config()),
@@ -768,7 +768,7 @@ func (t *TestTLSServer) NewClientWithCert(clientCert tls.Certificate) *Client {
 	}
 	tlsConfig.Time = t.AuthServer.AuthServer.clock.Now
 	tlsConfig.Certificates = []tls.Certificate{clientCert}
-	newClient, err := NewClient(client.Config{
+	newClient, err := NewClient(context.Background(), client.Config{
 		Addrs: []string{t.Addr().String()},
 		Credentials: []client.Credentials{
 			client.LoadTLS(tlsConfig),
@@ -787,7 +787,7 @@ func (t *TestTLSServer) NewClient(identity TestIdentity) (*Client, error) {
 		return nil, trace.Wrap(err)
 	}
 
-	newClient, err := NewClient(client.Config{
+	newClient, err := NewClient(context.Background(), client.Config{
 		DialInBackground: true,
 		Addrs:            []string{t.Addr().String()},
 		Credentials: []client.Credentials{

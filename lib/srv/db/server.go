@@ -593,7 +593,7 @@ func (s *Server) Close() error {
 		s.watcher.Close()
 	}
 
-	if err = s.cfg.CloudIAM.Close(); err != nil {
+	if err := s.cfg.CloudIAM.Close(); err != nil {
 		errors = append(errors, err)
 	}
 

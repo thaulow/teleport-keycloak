@@ -93,6 +93,7 @@ func (c *IAM) Teardown(ctx context.Context, database types.Database) error {
 
 // TODO
 func (c *IAM) Close() error {
+	c.log.Debug("Cleaning up IAM")
 	ctx := context.Background()
 
 	awsPolicy, err := c.getAWSPolicy(ctx)
@@ -101,10 +102,8 @@ func (c *IAM) Close() error {
 	}
 
 	err = awsPolicy.detachIAMPolicy(ctx)
-	if err != nil {
-		if !trace.IsNotFound(err) {
-			return trace.Wrap(err)
-		}
+	if err != nil && !trace.IsNotFound(err) {
+		return trace.Wrap(err)
 	}
 
 	return nil

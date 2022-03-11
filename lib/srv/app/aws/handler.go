@@ -25,7 +25,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/client"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
-	"github.com/aws/aws-sdk-go/aws/endpoints"
 	awssession "github.com/aws/aws-sdk-go/aws/session"
 	v4 "github.com/aws/aws-sdk-go/aws/signer/v4"
 	"github.com/gravitational/oxy/forward"
@@ -147,11 +146,20 @@ func (s *SigningService) RoundTrip(req *http.Request) (*http.Response, error) {
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	resolvedEndpoint, err := resolveEndpoint(req)
+
+	awsAuthHeader, err := awsutils.ParseSigV4(req.Header.Get(awsutils.AuthorizationHeader))
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	signedReq, err := s.prepareSignedRequest(req, resolvedEndpoint, identity)
+
+	var url string
+	if endpoint, ok := getEndpointFromHeader(req); ok {
+		url = "https://" + endpoint
+	} else if url, err = resolveEndpoint(req, awsAuthHeader); err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	signedReq, err := s.prepareSignedRequest(req, identity, awsAuthHeader, url)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -186,63 +194,22 @@ func (s *SigningService) formatForwardResponseError(rw http.ResponseWriter, r *h
 	}
 }
 
-// resolveEndpoint extracts the aws-service on and aws-region from the request authorization header
-// and resolves the aws-service and aws-region to AWS endpoint.
-func resolveEndpoint(r *http.Request) (*endpoints.ResolvedEndpoint, error) {
-	awsAuthHeader, err := awsutils.ParseSigV4(r.Header.Get(awsutils.AuthorizationHeader))
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-
-	if endpoint, ok := getAWSEndpointFromForwardedHost(r); ok {
-		return &endpoints.ResolvedEndpoint{
-			URL:           "https://" + endpoint,
-			SigningRegion: awsAuthHeader.Region,
-			SigningName:   awsAuthHeader.Service,
-		}, nil
-	}
-
-	resolvedEndpoint, err := endpoints.DefaultResolver().EndpointFor(awsAuthHeader.Service, awsAuthHeader.Region)
-	if err != nil {
-		return nil, trace.Wrap(err)
-	}
-	return &resolvedEndpoint, nil
-}
-
-// getAWSEndpointFromForwardedHost gets the host
-func getAWSEndpointFromForwardedHost(r *http.Request) (string, bool) {
-	host := r.Header.Get("X-Forwarded-Host")
-	if host == "" {
-		return "", false
-	}
-
-	// TODO(greedy52) check if host is a valid AWS endpoint.
-
-	if addr, err := libutils.ParseAddr(host); err != nil {
-		return "", false
-	} else if addr.IsLocal() {
-		return "", false
-	}
-
-	return host, true
-}
-
 // prepareSignedRequest creates a new HTTP request and rewrites the header from the original request and returns a new
 // HTTP request signed by STS AWS API.
-func (s *SigningService) prepareSignedRequest(r *http.Request, re *endpoints.ResolvedEndpoint, identity *tlsca.Identity) (*http.Request, error) {
+func (s *SigningService) prepareSignedRequest(r *http.Request, identity *tlsca.Identity, orgSig *awsutils.SigV4, url string) (*http.Request, error) {
 	payload, err := awsutils.GetAndReplaceReqBody(r)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	url := fmt.Sprintf("%s%s", re.URL, r.URL.Opaque)
-	reqCopy, err := http.NewRequest(r.Method, url, bytes.NewReader(payload))
+
+	reqCopy, err := http.NewRequest(r.Method, fmt.Sprintf("%s%s", url, r.URL.Opaque), bytes.NewReader(payload))
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 	rewriteHeaders(r, reqCopy)
 	// Sign the copy of the request.
 	signer := v4.NewSigner(s.getSigningCredentials(s.Session, identity))
-	_, err = signer.Sign(reqCopy, bytes.NewReader(payload), re.SigningName, re.SigningRegion, s.Clock.Now())
+	_, err = signer.Sign(reqCopy, bytes.NewReader(payload), orgSig.Service, orgSig.Region, s.Clock.Now())
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -271,4 +238,22 @@ func getAWSCredentialsFromSTSAPI(provider client.ConfigProvider, identity *tlsca
 			cred.Expiry.SetExpiration(identity.Expires, 0)
 		},
 	)
+}
+
+// getEndpointFromHeader gets original AWS endpoint from request headers.
+func getEndpointFromHeader(r *http.Request) (string, bool) {
+	host := r.Header.Get("X-Forwarded-Host")
+	if host == "" {
+		return "", false
+	}
+
+	// TODO(greedy52) check if host is a valid AWS endpoint.
+
+	if addr, err := libutils.ParseAddr(host); err != nil {
+		return "", false
+	} else if addr.IsLocal() {
+		return "", false
+	}
+
+	return host, true
 }

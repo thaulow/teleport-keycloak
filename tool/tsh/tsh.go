@@ -591,21 +591,23 @@ func Run(args []string, opts ...cliOption) error {
 
 	setEnvFlags(&cf, os.Getenv)
 
-	shutdown, err := tracing.InitializeTraceProvider(cf.Context,
-		tracing.Config{
-			Service:     "tsh",
-			AgentAddr:   os.Getenv("TELEPORT_TRACING_ADDR"),
-			SampleRatio: 1.0,
-		})
-	if err != nil {
-		return trace.Wrap(err)
-	}
-	defer shutdown(cf.Context)
-	cf.Tracer = otel.GetTracerProvider().Tracer("tsh", oteltrace.WithInstrumentationVersion(teleport.Version))
+	if addr := os.Getenv("TELEPORT_TRACING_ADDR"); addr != "" {
+		shutdown, err := tracing.InitializeTraceProvider(cf.Context,
+			tracing.Config{
+				Service:     "tsh",
+				AgentAddr:   addr,
+				SampleRatio: 1.0,
+			})
+		if err != nil {
+			return trace.Wrap(err)
+		}
+		defer shutdown(cf.Context)
+		cf.Tracer = otel.GetTracerProvider().Tracer("tsh", oteltrace.WithInstrumentationVersion(teleport.Version))
 
-	ctx, span := cf.Tracer.Start(cf.Context, command)
-	defer span.End()
-	cf.Context = ctx
+		ctx, span := cf.Tracer.Start(cf.Context, command)
+		defer span.End()
+		cf.Context = ctx
+	}
 
 	switch command {
 	case ver.FullCommand():

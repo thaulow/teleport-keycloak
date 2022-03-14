@@ -702,8 +702,10 @@ func NewTeleport(cfg *Config) (*TeleportProcess, error) {
 		warnOnErr(process.closeImportedDescriptors(teleport.ComponentDiagnostic), process.log)
 	}
 
-	if err := process.initTracing(); err != nil {
-		return nil, trace.Wrap(err)
+	if addr := os.Getenv("TELEPORT_TRACING_ADDR"); addr != "" {
+		if err := process.initTracing(addr); err != nil {
+			return nil, trace.Wrap(err)
+		}
 	}
 
 	// Create a process wide key generator that will be shared. This is so the
@@ -2012,7 +2014,7 @@ func (process *TeleportProcess) initUploaderService(accessPoint auth.AccessPoint
 	return nil
 }
 
-func (process *TeleportProcess) initTracing() error {
+func (process *TeleportProcess) initTracing(addr string) error {
 	process.log.Info("Initializing tracing provider and exporter.")
 
 	var components []string
@@ -2033,9 +2035,12 @@ func (process *TeleportProcess) initTracing() error {
 		attribute.String("teleport.host.uuid", process.Config.HostUUID),
 	}
 
-	closeTracing, err := tracing.InitializeTraceProvider(process.ExitContext(), tracing.Config{
+	ctx, cancel := context.WithTimeout(process.ExitContext(), 10*time.Second)
+	defer cancel()
+
+	closeTracing, err := tracing.InitializeTraceProvider(ctx, tracing.Config{
 		Service:     "teleport",
-		AgentAddr:   os.Getenv("TELEPORT_TRACING_ADDR"),
+		AgentAddr:   addr,
 		Attributes:  attrs,
 		SampleRatio: 1.0,
 	})

@@ -29,10 +29,8 @@ type Config struct {
 
 // InitializeTraceProvider creates and configures the corresponding trace provider.
 func InitializeTraceProvider(ctx context.Context, cfg Config) (func(ctx context.Context), error) {
-	var (
-		traceExp sdktrace.SpanExporter
-		clean    func() error
-	)
+	var traceExp sdktrace.SpanExporter
+	clean := func() error { return nil }
 
 	switch {
 	case cfg.AgentAddr != "":
@@ -99,10 +97,6 @@ func InitializeTraceProvider(ctx context.Context, cfg Config) (func(ctx context.
 		}
 		if err := traceExp.Shutdown(ctx); err != nil {
 			otel.Handle(err)
-		}
-
-		if clean == nil {
-			return
 		}
 
 		if err := clean(); err != nil {

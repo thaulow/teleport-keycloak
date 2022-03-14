@@ -30,7 +30,8 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go-v2/config"
+
 	"github.com/gravitational/trace"
 
 	"github.com/gravitational/teleport/api/profile"
@@ -211,22 +212,7 @@ func onProxyCommandDB(cf *CLIConf) error {
 
 // onProxyCommandAWS creates a local AWS proxy.
 func onProxyCommandAWS(cf *CLIConf) error {
-	profile, err := client.StatusCurrent(cf.HomePath, cf.Proxy)
-	if err != nil {
-		return trace.Wrap(err)
-	}
-
-	awsApp, err := pickActiveAWSApp(cf, profile)
-	if err != nil {
-		return trace.Wrap(err)
-	}
-
-	credProvider, err := getAWSCredentialsProvider(profile, awsApp)
-	if err != nil {
-		return trace.Wrap(err)
-	}
-
-	localProxy, err := createLocalAWSProxy(cf, profile, awsApp, credentials.NewCredentials(credProvider))
+	localProxy, err := createLocalAWSProxy(cf)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -237,12 +223,24 @@ func onProxyCommandAWS(cf *CLIConf) error {
 		localProxy.Close()
 	}()
 
+	profile, err := client.StatusCurrent(cf.HomePath, cf.Proxy)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	credFilePath := profile.AWSCredentialsPath("websconsole")
+	config, err := config.LoadSharedConfigProfile(cf.Context, "", func(options *config.LoadSharedConfigOptions) {
+		options.CredentialsFiles = []string{credFilePath}
+	})
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
 	endpointURL := url.URL{Scheme: "https", Host: localProxy.GetAddr()}
 	templateData := map[string]string{
-		"accessKeyID":     credProvider.AccessKeyID,
-		"secertAccessKey": credProvider.SecretAccessKey,
-		"caBundle":        credProvider.CustomCABundePath,
-		"credentialsFile": profile.AWSCredentialsPath(awsApp),
+		"accessKeyID":     config.Credentials.AccessKeyID,
+		"secertAccessKey": config.Credentials.SecretAccessKey,
+		"caBundle":        config.CustomCABundle,
+		"credentialsFile": credFilePath,
 		"address":         localProxy.GetAddr(),
 		"endpointURL":     endpointURL.String(),
 	}

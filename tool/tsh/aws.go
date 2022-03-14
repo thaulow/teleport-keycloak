@@ -21,10 +21,8 @@ import (
 	"crypto/sha1"
 	"crypto/tls"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/hex"
 	"fmt"
-	"net"
 	"net/url"
 	"os"
 	"os/exec"
@@ -33,12 +31,10 @@ import (
 	"time"
 
 	"github.com/gravitational/trace"
-	"github.com/jonboulle/clockwork"
 
 	"github.com/gravitational/teleport/lib/asciitable"
 	"github.com/gravitational/teleport/lib/client"
 	awscred "github.com/gravitational/teleport/lib/client/aws"
-	"github.com/gravitational/teleport/lib/defaults"
 	"github.com/gravitational/teleport/lib/srv/alpnproxy"
 	alpncommon "github.com/gravitational/teleport/lib/srv/alpnproxy/common"
 	"github.com/gravitational/teleport/lib/tlsca"
@@ -53,27 +49,7 @@ const (
 )
 
 func onAWS(cf *CLIConf) error {
-	profile, err := client.StatusCurrent(cf.HomePath, cf.Proxy)
-	if err != nil {
-		return trace.Wrap(err)
-	}
-
-	awsAppName, err := pickActiveAWSApp(cf, profile)
-	if err != nil {
-		return trace.Wrap(err)
-	}
-
-	credProvider, err := getAWSCredentialsProvider(profile, awsAppName)
-	if err != nil {
-		return trace.Wrap(err)
-	}
-
-	// Set credentials through environment variables for AWS CLI.
-	if err = credProvider.SetEnvironmentVariables(); err != nil {
-		return trace.Wrap(err)
-	}
-
-	lp, err := createLocalAWSProxy(cf, profile, awsAppName, credentials.NewCredentials(credProvider))
+	lp, err := createLocalAWSProxy(cf)
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -101,19 +77,39 @@ func onAWS(cf *CLIConf) error {
 }
 
 // createLocalAWSProxy creates a local proxy for AWS clients.
-func createLocalAWSProxy(cf *CLIConf, profile *client.ProfileStatus, awsApp string, cred *credentials.Credentials) (*alpnproxy.LocalProxy, error) {
+func createLocalAWSProxy(cf *CLIConf) (*alpnproxy.LocalProxy, error) {
+	profile, err := client.StatusCurrent(cf.HomePath, cf.Proxy)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	awsAppName, err := pickActiveAWSApp(cf, profile)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
 	tc, err := makeClient(cf, false)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
-	appCert, appX509Cert, err := loadAWSAppCertificate(tc, awsApp)
+	appCert, appX509Cert, err := loadAWSAppCertificate(tc, awsAppName)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
-	caCert, err := getSelfSignedLocalCert(profile, awsApp, appX509Cert)
+	caCert, err := getSelfSignedLocalCert(profile, awsAppName, appX509Cert)
 	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	credProvider, err := getAWSCredentialsProvider(profile, awsAppName)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	// Set credentials through environment variables for AWS CLI.
+	if err = credProvider.SetEnvironmentVariables(); err != nil {
 		return nil, trace.Wrap(err)
 	}
 
@@ -139,7 +135,7 @@ func createLocalAWSProxy(cf *CLIConf, profile *client.ProfileStatus, awsApp stri
 		InsecureSkipVerify: cf.InsecureSkipVerify,
 		ParentContext:      cf.Context,
 		SNI:                proxyAddress.Host(),
-		AWSCredentials:     cred,
+		AWSCredentials:     credentials.NewCredentials(credProvider),
 		Certs:              []tls.Certificate{appCert},
 	})
 	if err != nil {
@@ -286,87 +282,6 @@ func getAWSCredentialsProvider(profile *client.ProfileStatus, awsAppName string)
 		CustomCABundePath: caPath,
 	}
 	return awscred.SaveCredentialsFile(config, credFilePath)
-}
-
-// getSelfSignedLocalCert loads a self-signed local cert for the specified app,
-// or creates one if local cert does not exist or is expired.
-func getSelfSignedLocalCert(profile *client.ProfileStatus, appName string, appCert *x509.Certificate) (tls.Certificate, error) {
-	keyPath := profile.KeyPath()
-	caPath := profile.AppLocalhostCAPath(appName)
-
-	if utils.FileExists(caPath) {
-		cert, err := loadSelfSignedLocalCert(caPath, keyPath)
-		if err == nil {
-			return cert, nil
-		}
-
-		// Fallthrough to generate new ones.
-		log.WithError(err).Debugf("Failed to load self signed certificates from %v.", caPath)
-	}
-
-	return newSelfSignedLocalCert(caPath, keyPath, appCert.NotAfter)
-}
-
-// loadSelfSignedLocalCert loads cert and key pair from specified path and
-// verifies its expiry.
-func loadSelfSignedLocalCert(caPath, keyPath string) (tls.Certificate, error) {
-	cert, err := tls.LoadX509KeyPair(caPath, keyPath)
-	if err != nil {
-		return tls.Certificate{}, trace.Wrap(err)
-	}
-
-	if len(cert.Certificate) < 1 {
-		return tls.Certificate{}, trace.NotFound("invalid certificate length")
-	}
-
-	x509cert, err := x509.ParseCertificate(cert.Certificate[0])
-	if err != nil {
-		return tls.Certificate{}, trace.Wrap(err)
-	}
-
-	if err = utils.VerifyCertificateExpiry(x509cert, nil); err != nil {
-		return tls.Certificate{}, trace.Wrap(err)
-	}
-	return cert, nil
-}
-
-// newSelfSignedLocalCert generates new self signed local cert.
-func newSelfSignedLocalCert(caPath, keyPath string, notAfter time.Time) (tls.Certificate, error) {
-	keyPem, err := utils.ReadPath(keyPath)
-	if err != nil {
-		return tls.Certificate{}, trace.Wrap(err)
-	}
-
-	key, err := utils.ParsePrivateKey(keyPem)
-	if err != nil {
-		return tls.Certificate{}, trace.Wrap(err)
-	}
-
-	certPem, err := tlsca.GenerateSelfSignedCAWithConfig(tlsca.GenerateCAConfig{
-		Entity: pkix.Name{
-			CommonName:   "localhost",
-			Organization: []string{"Teleport"},
-		},
-		Signer:      key,
-		DNSNames:    []string{"localhost"},
-		IPAddresses: []net.IP{net.ParseIP(defaults.Localhost)},
-		TTL:         time.Until(notAfter),
-		Clock:       clockwork.NewRealClock(),
-	})
-	if err != nil {
-		return tls.Certificate{}, trace.Wrap(err)
-	}
-
-	cert, err := tls.X509KeyPair(certPem, keyPem)
-	if err != nil {
-		return tls.Certificate{}, trace.Wrap(err)
-	}
-
-	// WriteFile truncates existing file before writing.
-	if err = os.WriteFile(caPath, certPem, 0600); err != nil {
-		return tls.Certificate{}, trace.ConvertSystemError(err)
-	}
-	return cert, nil
 }
 
 func pickActiveAWSApp(cf *CLIConf, profile *client.ProfileStatus) (string, error) {

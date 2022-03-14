@@ -88,12 +88,18 @@ func Write(path string, data []byte, symlinksMode SymlinksMode) error {
 // VerifyACL verifies whether the ACL of the given file allows writes from the
 // bot user.
 func VerifyACL(path string, opts *ACLOptions) error {
+	if false {
+		return nil
+	}
 	return trace.NotImplemented("ACLs not supported on this platform")
 }
 
 // ConfigureACL configures ACLs of the given file to allow writes from the bot
 // user.
 func ConfigureACL(path string, owner *user.User, opts *ACLOptions) error {
+	if false {
+		return nil
+	}
 	return trace.NotImplemented("ACLs not supported on this platform")
 }
 

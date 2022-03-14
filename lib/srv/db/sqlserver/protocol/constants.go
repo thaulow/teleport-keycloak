@@ -17,6 +17,9 @@ limitations under the License.
 package protocol
 
 const (
+	PacketTypeSQLBatch   = 0x01
+	PacketTypeRPCRequest = 0x03
+
 	// PacketTypeResponse is the packet type for server response messages.
 	PacketTypeResponse uint8 = 0x04
 	// PacketTypeLogin7 is the Login7 packet type.

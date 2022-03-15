@@ -69,8 +69,11 @@ func onAWS(cf *CLIConf) error {
 		}
 	}()
 
-	endpointURL := url.URL{Scheme: "https", Host: lp.GetAddr()}
-	if err := os.Setenv("https_proxy", endpointURL.String()); err != nil {
+	url := url.URL{
+		Host:   lp.GetAddr(),
+		Scheme: "https",
+	}
+	if err := os.Setenv("HTTPS_PROXY", url.String()); err != nil {
 		return trace.Wrap(err)
 	}
 
@@ -101,14 +104,20 @@ type awsApp struct {
 	credentials *credentials.Credentials
 }
 
-func newAWSApp(cf *CLIConf, profile *client.ProfileStatus, appName string) *awsApp {
+func newAWSApp(cf *CLIConf, profile *client.ProfileStatus, appName string) (*awsApp, error) {
+	tc, err := makeClient(cf, false)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
 	return &awsApp{
 		cf:             cf,
+		tc:             tc,
 		profile:        profile,
 		appName:        appName,
 		localCAKeyPath: profile.KeyPath(),
 		localCAPath:    profile.AppLocalhostCAPath(appName),
-	}
+	}, nil
 }
 
 // loadSelfSignedCA loads self-signed CA.
@@ -245,12 +254,6 @@ func (a *awsApp) createLocalAWSProxy() (*alpnproxy.LocalProxy, error) {
 
 // loadAWSAppCertificate loads the certificate for the specified AWS app.
 func (a *awsApp) loadAppCertificate() (err error) {
-	if a.tc == nil {
-		if a.tc, err = makeClient(a.cf, false); err != nil {
-			return trace.Wrap(err)
-		}
-	}
-
 	key, err := a.tc.LocalAgent().GetKey(a.tc.SiteName, client.WithAppCerts{})
 	if err != nil {
 		return trace.Wrap(err)
@@ -411,7 +414,7 @@ func pickActiveAWSApp(cf *CLIConf) (*awsApp, error) {
 				"Selected app %q is not an AWS application", name,
 			)
 		}
-		return newAWSApp(cf, profile, name), nil
+		return newAWSApp(cf, profile, name)
 	}
 
 	awsApps := profile.AWSAppNames()
@@ -424,13 +427,17 @@ func pickActiveAWSApp(cf *CLIConf) (*awsApp, error) {
 			"Multiple AWS apps are available (%v), please specify one using --app CLI argument", names,
 		)
 	}
-	return newAWSApp(cf, profile, awsApps[0]), nil
+	return newAWSApp(cf, profile, awsApps[0])
 }
 
 // postAWSAppLogin handles an AWS app after its app login.
 func postAWSAppLogin(cf *CLIConf, profile *client.ProfileStatus, awsAppName string) error {
-	awsApp := newAWSApp(cf, profile, awsAppName)
-	if err := awsApp.generateSelfSignedCA(); err != nil {
+	awsApp, err := newAWSApp(cf, profile, awsAppName)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	if err = awsApp.generateSelfSignedCA(); err != nil {
 		return trace.Wrap(err)
 	}
 

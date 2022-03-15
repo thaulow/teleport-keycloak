@@ -220,47 +220,41 @@ func IsSelfSigned(certificateChain []*x509.Certificate) bool {
 // ReadCertificateChain parses PEM encoded bytes that can contain one or
 // multiple certificates and returns a slice of x509.Certificate.
 func ReadCertificateChain(certificateChainBytes []byte) ([]*x509.Certificate, error) {
-	return ReadCertificates(certificateChainBytes)
-}
-
-// ReadCertificates parses PEM encoded bytes that can contain one or
-// multiple certificates and returns a slice of x509.Certificate.
-func ReadCertificates(certificatesBytes []byte) ([]*x509.Certificate, error) {
-	// build the certificate slice next
+	// build the certificate chain next
 	var (
 		certificateBlock *pem.Block
-		certificates     [][]byte
+		certificateChain [][]byte
 	)
-	remainingBytes := bytes.TrimSpace(certificatesBytes)
+	remainingBytes := bytes.TrimSpace(certificateChainBytes)
 
 	for {
 		certificateBlock, remainingBytes = pem.Decode(remainingBytes)
 		if certificateBlock == nil || certificateBlock.Type != pemBlockCertificate {
 			return nil, trace.NotFound("no PEM data found")
 		}
-		certificates = append(certificates, certificateBlock.Bytes)
+		certificateChain = append(certificateChain, certificateBlock.Bytes)
 
 		if len(remainingBytes) == 0 {
 			break
 		}
 	}
 
-	// build a concatenated certificate bytes buffer
+	// build a concatenated certificate chain
 	var buf bytes.Buffer
-	for _, cc := range certificates {
+	for _, cc := range certificateChain {
 		_, err := buf.Write(cc)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
 	}
 
-	// parse the concatenated buffer and get a slice of x509.Certificates.
-	x509certs, err := x509.ParseCertificates(buf.Bytes())
+	// parse the chain and get a slice of x509.Certificates.
+	x509Chain, err := x509.ParseCertificates(buf.Bytes())
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
-	return x509certs, nil
+	return x509Chain, nil
 }
 
 const pemBlockCertificate = "CERTIFICATE"

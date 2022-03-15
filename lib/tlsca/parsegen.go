@@ -35,7 +35,6 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/gravitational/teleport/api/constants"
-	"github.com/gravitational/teleport/lib/defaults"
 	"github.com/gravitational/teleport/lib/utils"
 )
 
@@ -128,30 +127,6 @@ func GenerateSelfSignedCA(entity pkix.Name, dnsNames []string, ttl time.Duration
 	return keyPEM, certPEM, err
 }
 
-// GenerateSelfSignedCAForLocalhost generates self-signed certificate authority
-// with 127.0.0.1 as an IP address in SAN.
-func GenerateSelfSignedCAForLocalhost(entity pkix.Name, ttl time.Duration) ([]byte, []byte, error) {
-	priv, err := rsa.GenerateKey(rand.Reader, constants.RSAKeySize)
-	if err != nil {
-		return nil, nil, trace.Wrap(err)
-	}
-
-	if entity.CommonName == "" {
-		entity.CommonName = "localhost"
-	}
-
-	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)})
-	certPEM, err := GenerateSelfSignedCAWithConfig(GenerateCAConfig{
-		Signer:      priv,
-		Entity:      entity,
-		DNSNames:    []string{entity.CommonName},
-		IPAddresses: []net.IP{net.ParseIP(defaults.Localhost)},
-		TTL:         ttl,
-		Clock:       clockwork.NewRealClock(),
-	})
-	return keyPEM, certPEM, err
-}
-
 // ParseCertificateRequestPEM parses PEM-encoded certificate signing request
 func ParseCertificateRequestPEM(bytes []byte) (*x509.CertificateRequest, error) {
 	block, _ := pem.Decode(bytes)
@@ -210,6 +185,8 @@ func GenerateAndSignCertificateForDomain(domain string, ca tls.Certificate) (*tl
 		IPAddresses:  caX509.IPAddresses,
 	}
 
+	// If specified domain is an IP, use original DNSNames, and append the IP
+	// to the original IP list.
 	if addr := net.ParseIP(domain); addr != nil {
 		template.DNSNames = caX509.DNSNames
 		template.IPAddresses = append(template.IPAddresses, addr)

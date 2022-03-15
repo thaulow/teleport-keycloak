@@ -226,14 +226,17 @@ func onProxyCommandAWS(cf *CLIConf) error {
 		localProxy.Close()
 	}()
 
-	endpointURL := url.URL{Scheme: "https", Host: localProxy.GetAddr()}
+	url := url.URL{
+		Host:   localProxy.GetAddr(),
+		Scheme: "https",
+	}
 	templateData, err := awsApp.getAWSEnvCredentials()
 	if err != nil {
 		return trace.Wrap(err)
 	}
 
 	templateData["address"] = localProxy.GetAddr()
-	templateData["endpointURL"] = endpointURL.String()
+	templateData["endpointURL"] = url.String()
 
 	if err = awsProxyTemplate.Execute(os.Stdout, templateData); err != nil {
 		return trace.Wrap(err)

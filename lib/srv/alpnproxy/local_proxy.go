@@ -307,7 +307,10 @@ func (l *LocalProxy) Close() error {
 	return nil
 }
 
-// StartAWSAccessProxy starts the local AWS CLI proxy.
+// StartAWSAccessProxy starts the local AWS proxy.
+// The local AWS proxy supports both:
+// - serving APIs sent by clients with endpoint-url set to the local proxy.
+// - serving APIs sent by clients with HTTPS_PROXY set to the local proxy.
 func (l *LocalProxy) StartAWSAccessProxy(ctx context.Context) error {
 	err := http.Serve(l.cfg.Listener, http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		if req.Method == "CONNECT" {
@@ -372,22 +375,22 @@ func (l *LocalProxy) handleAWSRequest(rw http.ResponseWriter, req *http.Request)
 // 1b. Local proxy first recevies a CONNECT request from the client connection.
 //     It then prepares a TLS certificate for the requested hostname. Then, the
 //     local proxy creates a 2nd connection to itself for tunneling the data.
-//     Once ready, the local proxy sends back a 200 to the client to let it
-//     know that it can start sending data.
+//     Once the tunnel is ready, the local proxy sends back a 200 to the client
+//     to let it know that it can start sending data to the tunnel.
 // 2a. Client sends the normal HTTPS request through the 1st connection.
 // 2b. Local proxy forwards all data received from the 1st connection to the
 //     2nd connection.
 // 2c. Local proxy serves the HTTPS request from the 2nd connection using the
 //     newly generated certficate.
 // 3a. Local proxy adds the hostname (e.g. s3.us-east-1.amazonaws.com) to
-//     "X-Forwarded-Host" header then revere proxies the request to the
-//     Teleport server.
-// 3b. The response traverses through the 2nd connection then to the 1st
-//     connection back to the client.
+//     "X-Forwarded-Host" header and revere proxies the request to the Teleport
+//     server.
+// 3b. The response traverses through the reverse proxy, then the 2nd
+//     connection, then the 1st connection, back to the client.
 //
 // Ideally the 2nd-connection-to-itself is not required if we can decrypt the
 // client connection directly. However, many "net/http" functionalities are
-// private (e.g. http.conn.serve) for handling a raw connection so it is much
+// private (e.g. http.conn.serve) for handling a raw HTTP connection so it is
 // easier to forward back to itself.
 func (l *LocalProxy) handleForwardProxy(rw http.ResponseWriter, req *http.Request) {
 	// Hijack client connection.
@@ -472,7 +475,7 @@ func NewHTTPSFowardProxyListener(listenAddr string, ca tls.Certificate) (l *HTTP
 }
 
 // GetCertificate return TLS certificate based on SNI. Implements
-// GetCertificate of tls.Config.
+// tls.Config.GetCertificate.
 func (l *HTTPSForwardProxyListener) GetCertificate(clientHello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -486,15 +489,15 @@ func (l *HTTPSForwardProxyListener) GetCertificate(clientHello *tls.ClientHelloI
 
 // AddHost generates a new certificate for the specified host.
 func (l *HTTPSForwardProxyListener) AddHost(host string) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
 	// Remove port.
 	addr, err := utils.ParseAddr(host)
 	if err != nil {
 		return trace.Wrap(err)
 	}
 	host = addr.Host()
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
 
 	if _, found := l.certificatesByHost[host]; found {
 		return nil

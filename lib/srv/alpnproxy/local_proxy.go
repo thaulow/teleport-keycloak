@@ -327,6 +327,8 @@ func (l *LocalProxy) StartAWSAccessProxy(ctx context.Context) error {
 func (l *LocalProxy) handleAWSRequest(rw http.ResponseWriter, req *http.Request) {
 	if err := aws.VerifyAWSSignature(req, l.cfg.AWSCredentials); err != nil {
 		log.WithError(err).Errorf("AWS signature verification failed.")
+		// TODO(greedy52) format a proper AWS XML error.
+		rw.Write([]byte(err.Error()))
 		rw.WriteHeader(http.StatusForbidden)
 		return
 	}
@@ -422,8 +424,7 @@ func (l *LocalProxy) handleForwardProxy(rw http.ResponseWriter, req *http.Reques
 	clientConn.Write([]byte(fmt.Sprintf("%v 200 OK\r\n\r\n", req.Proto)))
 
 	// Stream everything from client to local proxy.
-	log.Debugf("Started forward proxying for %v", req.Host)
-	defer log.Debugf("Finished forward proxying for %v", req.Host)
+	log.Debugf("Forward proxying for %v", req.Host)
 
 	wg := &sync.WaitGroup{}
 	wg.Add(2)

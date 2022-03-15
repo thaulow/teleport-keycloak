@@ -48,8 +48,6 @@ const (
 	kubeDirSuffix = "-kube"
 	// kubeConfigSuffix is the suffix of a kubeconfig file stored under the keys directory.
 	kubeConfigSuffix = "-kubeconfig"
-	// awsCredentialsSuffix is the suffix of an AWS credentials file stored under the keys directory.
-	awsCredentialsSuffix = "-credentials"
 	// casDir is the directory name for where clusters certs are stored.
 	casDir = "cas"
 	// fileExtPem is the extension of a file where a public certificate is stored.
@@ -57,45 +55,44 @@ const (
 )
 
 // Here's the file layout of all these keypaths.
-// ~/.tsh/							   --> default base directory
-// ├── known_hosts                     --> trusted certificate authorities (their keys) in a format similar to known_hosts
-// └── keys							   --> session keys directory
-//    ├── one.example.com              --> Proxy hostname
-//    │   ├── certs.pem                --> TLS CA certs for the Teleport CA
-//    │   ├── foo                      --> RSA Private Key for user "foo"
-//    │   ├── foo.pub                  --> Public Key
-//    │   ├── foo-x509.pem             --> TLS client certificate for Auth Server
-//    │   ├── foo-ssh                  --> SSH certs for user "foo"
-//    │   │   ├── root-cert.pub        --> SSH cert for Teleport cluster "root"
-//    │   │   └── leaf-cert.pub        --> SSH cert for Teleport cluster "leaf"
-//    │   ├── foo-app                  --> Database access certs for user "foo"
-//    │   │   ├── root                 --> Database access certs for cluster "root"
-//    │   │   │   ├── appA-x509.pem    --> TLS cert for app service "appA"
-//    │   │   │   └── appB-x509.pem    --> TLS cert for app service "appB"
-//    │   │   │   └── appB-credentials      --> AWS credentials file for AWS app service "appB"
+// ~/.tsh/							        --> default base directory
+// ├── known_hosts                          --> trusted certificate authorities (their keys) in a format similar to known_hosts
+// └── keys							        --> session keys directory
+//    ├── one.example.com                   --> Proxy hostname
+//    │   ├── certs.pem                     --> TLS CA certs for the Teleport CA
+//    │   ├── foo                           --> RSA Private Key for user "foo"
+//    │   ├── foo.pub                       --> Public Key
+//    │   ├── foo-x509.pem                  --> TLS client certificate for Auth Server
+//    │   ├── foo-ssh                       --> SSH certs for user "foo"
+//    │   │   ├── root-cert.pub             --> SSH cert for Teleport cluster "root"
+//    │   │   └── leaf-cert.pub             --> SSH cert for Teleport cluster "leaf"
+//    │   ├── foo-app                       --> Database access certs for user "foo"
+//    │   │   ├── root                      --> Database access certs for cluster "root"
+//    │   │   │   ├── appA-x509.pem         --> TLS cert for app service "appA"
+//    │   │   │   └── appB-x509.pem         --> TLS cert for app service "appB"
 //    │   │   │   └── appB-localhost-ca.pem --> Self-signed localhost CA cert for app service "appB"
-//    │   │   └── leaf                 --> Database access certs for cluster "leaf"
-//    │   │       └── appC-x509.pem    --> TLS cert for app service "appC"
-//    │   ├── foo-db                   --> App access certs for user "foo"
-//    │   │   ├── root                 --> App access certs for cluster "root"
-//    │   │   │   ├── dbA-x509.pem     --> TLS cert for database service "dbA"
-//    │   │   │   └── dbB-x509.pem     --> TLS cert for database service "dbB"
-//    │   │   └── leaf                 --> App access certs for cluster "leaf"
-//    │   │       └── dbC-x509.pem     --> TLS cert for database service "dbC"
-//    │   ├── foo-kube                 --> Kubernetes certs for user "foo"
-//    │   |    ├── root                 --> Kubernetes certs for Teleport cluster "root"
-//    │   |    │   ├── kubeA-kubeconfig --> standalone kubeconfig for Kubernetes cluster "kubeA"
-//    │   |    │   ├── kubeA-x509.pem   --> TLS cert for Kubernetes cluster "kubeA"
-//    │   |    │   ├── kubeB-kubeconfig --> standalone kubeconfig for Kubernetes cluster "kubeB"
-//    │   |    │   └── kubeB-x509.pem   --> TLS cert for Kubernetes cluster "kubeB"
-//    │   |    └── leaf                 --> Kubernetes certs for Teleport cluster "leaf"
-//    │   |        ├── kubeC-kubeconfig --> standalone kubeconfig for Kubernetes cluster "kubeC"
-//    │   |        └── kubeC-x509.pem   --> TLS cert for Kubernetes cluster "kubeC"
-//    |   └── cas                       --> Trusted clusters certificates
-//    |        ├── root.pem             --> TLS CA for teleport cluster "root"
-//    |        ├── leaf1.pem            --> TLS CA for teleport cluster "leaf1"
-//    |        └── leaf2.pem            --> TLS CA for teleport cluster "leaf2"
-//    └── two.example.com			    --> Additional proxy host entries follow the same format
+//    │   │   └── leaf                      --> Database access certs for cluster "leaf"
+//    │   │       └── appC-x509.pem         --> TLS cert for app service "appC"
+//    │   ├── foo-db                        --> App access certs for user "foo"
+//    │   │   ├── root                      --> App access certs for cluster "root"
+//    │   │   │   ├── dbA-x509.pem          --> TLS cert for database service "dbA"
+//    │   │   │   └── dbB-x509.pem          --> TLS cert for database service "dbB"
+//    │   │   └── leaf                      --> App access certs for cluster "leaf"
+//    │   │       └── dbC-x509.pem          --> TLS cert for database service "dbC"
+//    │   ├── foo-kube                      --> Kubernetes certs for user "foo"
+//    │   |    ├── root                     --> Kubernetes certs for Teleport cluster "root"
+//    │   |    │   ├── kubeA-kubeconfig     --> standalone kubeconfig for Kubernetes cluster "kubeA"
+//    │   |    │   ├── kubeA-x509.pem       --> TLS cert for Kubernetes cluster "kubeA"
+//    │   |    │   ├── kubeB-kubeconfig     --> standalone kubeconfig for Kubernetes cluster "kubeB"
+//    │   |    │   └── kubeB-x509.pem       --> TLS cert for Kubernetes cluster "kubeB"
+//    │   |    └── leaf                     --> Kubernetes certs for Teleport cluster "leaf"
+//    │   |        ├── kubeC-kubeconfig     --> standalone kubeconfig for Kubernetes cluster "kubeC"
+//    │   |        └── kubeC-x509.pem       --> TLS cert for Kubernetes cluster "kubeC"
+//    |   └── cas                           --> Trusted clusters certificates
+//    |        ├── root.pem                 --> TLS CA for teleport cluster "root"
+//    |        ├── leaf1.pem                --> TLS CA for teleport cluster "leaf1"
+//    |        └── leaf2.pem                --> TLS CA for teleport cluster "leaf2"
+//    └── two.example.com			        --> Additional proxy host entries follow the same format
 //		  ...
 
 // KeyDir returns the path to the keys directory.
@@ -208,14 +205,6 @@ func AppCertPath(baseDir, proxy, username, cluster, appname string) string {
 // <baseDir>/keys/<proxy>/<username>-app/<cluster>/<appname>-localhost-ca.pem
 func AppLocalhostCAPath(baseDir, proxy, username, cluster, appname string) string {
 	return filepath.Join(AppCertDir(baseDir, proxy, username, cluster), appname+fileExtLocalhostCA)
-}
-
-// AWSCredentialsPath returns the path to an AWS credentials file for the
-// given proxy, cluster, and app.
-//
-// <baseDir>/keys/<proxy>/<username>-app/<cluster>/<appname>-credentials
-func AWSCredentialsPath(baseDir, proxy, username, cluster, awsAppname string) string {
-	return filepath.Join(AppCertDir(baseDir, proxy, username, cluster), awsAppname+awsCredentialsSuffix)
 }
 
 // DatabaseDir returns the path to the user's database directory

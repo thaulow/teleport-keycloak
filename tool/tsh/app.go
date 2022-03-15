@@ -88,10 +88,7 @@ func onAppLogin(cf *CLIConf) error {
 		return trace.Wrap(err)
 	}
 	if app.IsAWSConsole() {
-		return awsCliTpl.Execute(os.Stdout, map[string]string{
-			"awsAppName": app.GetName(),
-			"awsCmd":     "s3 ls",
-		})
+		return postAWSAppLogin(cf, profile, app.GetName())
 	}
 	return appLoginTpl.Execute(os.Stdout, map[string]string{
 		"appName": app.GetName(),
@@ -104,13 +101,6 @@ var appLoginTpl = template.Must(template.New("").Parse(
 	`Logged into app {{.appName}}. Example curl command:
 
 {{.curlCmd}}
-`))
-
-// awsCliTpl is the message that gets printed to a user upon successful aws app login.
-var awsCliTpl = template.Must(template.New("").Parse(
-	`Logged into AWS app {{.awsAppName}}. Example AWS cli command:
-
-tsh aws {{.awsCmd}}
 `))
 
 // getRegisteredApp returns the registered application with the specified name.
@@ -175,7 +165,7 @@ func onAppLogout(cf *CLIConf) error {
 			return trace.Wrap(err)
 		}
 
-		if err = deleteAppFiles(profile, app.Name); err != nil {
+		if err = cleanupAppFiles(profile, app.Name); err != nil {
 			return trace.Wrap(err)
 		}
 	}
@@ -265,11 +255,10 @@ func pickActiveApp(cf *CLIConf) (*tlsca.RouteToApp, error) {
 	return nil, trace.NotFound("not logged into app %q", name)
 }
 
-// deleteAppFiles deletes generated files for the specified app.
-func deleteAppFiles(profile *client.ProfileStatus, appName string) error {
+// cleanupAppFiles deletes generated files for the specified app.
+func cleanupAppFiles(profile *client.ProfileStatus, appName string) error {
 	for _, filePath := range []string{
 		profile.AppLocalhostCAPath(appName),
-		profile.AWSCredentialsPath(appName),
 	} {
 		if !utils.FileExists(filePath) {
 			continue

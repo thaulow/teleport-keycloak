@@ -159,6 +159,16 @@ func VerifyAWSSignature(req *http.Request, credentials *credentials.Credentials)
 	if err != nil {
 		return trace.BadParameter(err.Error())
 	}
+
+	credValues, err := credentials.Get()
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	if sigV4.KeyID != credValues.AccessKeyID {
+		return trace.AccessDenied("AccessKeyID does not match")
+	}
+
 	// Read the request body and replace the body ready with a new reader that will allow reading the body again
 	// by HTTP Transport.
 	payload, err := GetAndReplaceReqBody(req)

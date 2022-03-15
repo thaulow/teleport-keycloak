@@ -30,8 +30,6 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/config"
-
 	"github.com/gravitational/trace"
 
 	"github.com/gravitational/teleport/api/profile"
@@ -212,7 +210,12 @@ func onProxyCommandDB(cf *CLIConf) error {
 
 // onProxyCommandAWS creates a local AWS proxy.
 func onProxyCommandAWS(cf *CLIConf) error {
-	localProxy, err := createLocalAWSProxy(cf)
+	awsApp, err := pickActiveAWSApp(cf)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	localProxy, err := awsApp.createLocalAWSProxy()
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -223,31 +226,19 @@ func onProxyCommandAWS(cf *CLIConf) error {
 		localProxy.Close()
 	}()
 
-	profile, err := client.StatusCurrent(cf.HomePath, cf.Proxy)
-	if err != nil {
-		return trace.Wrap(err)
-	}
-	credFilePath := profile.AWSCredentialsPath("websconsole")
-	config, err := config.LoadSharedConfigProfile(cf.Context, "", func(options *config.LoadSharedConfigOptions) {
-		options.CredentialsFiles = []string{credFilePath}
-	})
+	endpointURL := url.URL{Scheme: "https", Host: localProxy.GetAddr()}
+	templateData, err := awsApp.getAWSEnvCredentials()
 	if err != nil {
 		return trace.Wrap(err)
 	}
 
-	endpointURL := url.URL{Scheme: "https", Host: localProxy.GetAddr()}
-	templateData := map[string]string{
-		"accessKeyID":     config.Credentials.AccessKeyID,
-		"secertAccessKey": config.Credentials.SecretAccessKey,
-		"caBundle":        config.CustomCABundle,
-		"credentialsFile": credFilePath,
-		"address":         localProxy.GetAddr(),
-		"endpointURL":     endpointURL.String(),
-	}
+	templateData["address"] = localProxy.GetAddr()
+	templateData["endpointURL"] = endpointURL.String()
+
 	if err = awsProxyTemplate.Execute(os.Stdout, templateData); err != nil {
 		return trace.Wrap(err)
 	}
-	if err := localProxy.StartAWSAccessProxy(cf.Context); err != nil {
+	if err = localProxy.StartAWSAccessProxy(cf.Context); err != nil {
 		return trace.Wrap(err)
 	}
 	return nil
@@ -403,19 +394,15 @@ Use the following credentials to connect to the {{.database}} proxy:
 	// proxy is started.
 	awsProxyTemplate = template.Must(template.New("").Parse(`Started AWS proxy on {{.address}}
 
-To connect to the proxy, set the following environment variable to use the
-credentials saved in this shared credentials file:
+To connect to the proxy, set the following environment variables to configure
+the AWS credentials and proxy settings:
+  AWS_ACCESS_KEY_ID={{.AWS_ACCESS_KEY_ID}}
+  AWS_SECRET_ACCESS_KEY={{.AWS_SECRET_ACCESS_KEY}}
+  AWS_CA_BUNDLE={{.AWS_CA_BUNDLE}}
+  HTTPS_PROXY={{.endpointURL}}
 
-  AWS_SHARED_CREDENTIALS_FILE={{.credentialsFile}}
-
-Alternatively, use the following credentials directly:
-
-  AWS_ACCESS_KEY_ID={{.accessKeyID}}
-  AWS_SECRET_ACCESS_KEY={{.secertAccessKey}}
-  AWS_CA_BUNDLE={{.caBundle}}
-
-In addition to the credentials, please use "{{.endpointURL}}" as the endpoint
-URL(s) in your AWS client applications.
+If "HTTPS_PROXY" is not supproted by the application, please use
+"{{.endpointURL}}" as the endpoint URL(s) in the application.
 
 `))
 )

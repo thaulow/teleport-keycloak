@@ -484,14 +484,6 @@ func (p *ProfileStatus) AppLocalhostCAPath(name string) string {
 	return keypaths.AppLocalhostCAPath(p.Dir, p.Name, p.Username, p.Cluster, name)
 }
 
-// AWSCredentialsPath returns the specified app's AWS credentials file path for
-// this profile.
-//
-// It's kept in <profile-dir>/keys/<proxy>/<user>-app/<cluster>/<name>-credentials
-func (p *ProfileStatus) AWSCredentialsPath(name string) string {
-	return keypaths.AWSCredentialsPath(p.Dir, p.Name, p.Username, p.Cluster, name)
-}
-
 // KubeConfigPath returns path to the specified kubeconfig for this profile.
 //
 // It's kept in <profile-dir>/keys/<proxy>/<user>-kube/<cluster>/<name>-kubeconfig
@@ -537,6 +529,26 @@ func (p *ProfileStatus) AppNames() (result []string) {
 		result = append(result, app.Name)
 	}
 	return result
+}
+
+// AWSAppNames returns a list of AWS app names.
+func (p *ProfileStatus) AWSAppNames() (result []string) {
+	for _, app := range p.Apps {
+		if app.AWSRoleARN != "" {
+			result = append(result, app.Name)
+		}
+	}
+	return result
+}
+
+// FindApp finds an app by specified name.
+func (p *ProfileStatus) FindApp(appName string) (*tlsca.RouteToApp, error) {
+	for _, app := range p.Apps {
+		if app.Name == appName {
+			return &app, nil
+		}
+	}
+	return nil, trace.NotFound("failed to find app with %q name", appName)
 }
 
 // RetryWithRelogin is a helper error handling method,

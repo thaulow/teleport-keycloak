@@ -1094,7 +1094,8 @@ func ApplyDefaults(cfg *Config) {
 	// details.
 	kex := utils.RemoveFromSlice(sc.KeyExchanges,
 		defaults.DiffieHellmanGroup1SHA1,
-		defaults.DiffieHellmanGroup14SHA1)
+		defaults.DiffieHellmanGroup14SHA1,
+		defaults.DiffieHellmanGroup14SHA256)
 	macs := utils.RemoveFromSlice(sc.MACs,
 		defaults.HMACSHA1,
 		defaults.HMACSHA196)

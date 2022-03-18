@@ -6,11 +6,38 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"sync"
+	"sync/atomic"
+	"time"
 	"unicode/utf16"
 
 	mssql "github.com/denisenkom/go-mssqldb"
 	"github.com/gravitational/trace"
 )
+
+var once sync.Once
+var pkgWritterCounter uint32
+var dir string
+
+func DumpToFile(p *Packet) error {
+	once.Do(func() {
+		dir := fmt.Sprintf("/home/ec2-user/fpackets/%d", time.Now().Second())
+		err := os.MkdirAll(dir, 0700)
+		if err != nil {
+			panic(err)
+		}
+	})
+
+	n := atomic.AddUint32(&pkgWritterCounter, 1)
+	name := fmt.Sprintf("%d_packet.bin", n)
+	err := os.WriteFile(filepath.Join(dir, name), p.Raw.Bytes(), 0700)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	return nil
+}
 
 type SQLBatch struct {
 	*Packet
@@ -31,12 +58,13 @@ func ToSQLBatch(p *Packet) (*SQLBatch, error) {
 		return nil, trace.Wrap(err)
 	}
 
-	fmt.Println(hex.Dump(p.Data[:]))
-
 	if int(headersLength) > len(p.Data) {
 		// TODO debug this case
 		fmt.Println("Got invalid packet:")
-		fmt.Println(hex.Dump(p.Raw.Bytes()))
+		if err := DumpToFile(p); err != nil {
+			fmt.Println(err)
+
+		}
 		return nil, trace.BadParameter("invalid headersLength size")
 
 	}

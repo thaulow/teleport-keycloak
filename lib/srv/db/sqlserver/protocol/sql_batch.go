@@ -23,7 +23,7 @@ var dir string
 
 func DumpToFile(p *Packet) error {
 	once.Do(func() {
-		dir := fmt.Sprintf("/home/ec2-user/fpackets/%d", time.Now().Second())
+		dir = fmt.Sprintf("/home/ec2-user/fpackets/%d", time.Now().Nanosecond())
 		err := os.MkdirAll(dir, 0700)
 		if err != nil {
 			panic(err)

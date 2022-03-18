@@ -287,7 +287,7 @@ func maybeStartLocalProxy(cf *CLIConf, tc *client.TeleportClient, profile *clien
 		return []ConnectCommandFunc{}, nil
 	}
 
-	listener, err := net.Listen("tcp", "localhost:0")
+	listener, err := net.Listen("tcp", "localhost:1433")
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

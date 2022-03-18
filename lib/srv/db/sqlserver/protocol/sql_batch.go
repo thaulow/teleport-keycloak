@@ -22,8 +22,13 @@ var pkgWritterCounter uint32
 var dir string
 
 func DumpToFile(p *Packet) error {
+	topDIR := os.Getenv("SQLSERVER_DUMP_PATH")
+	if topDIR == "" {
+		return nil
+
+	}
 	once.Do(func() {
-		dir = fmt.Sprintf("/home/ec2-user/fpackets/%d", time.Now().Nanosecond())
+		dir = fmt.Sprintf("%s/%d", topDIR, time.Now().Nanosecond())
 		err := os.MkdirAll(dir, 0700)
 		if err != nil {
 			panic(err)
@@ -54,13 +59,18 @@ func ToSQLBatch(p *Packet) (*SQLBatch, error) {
 	}
 
 	var headersLength uint32
-	if err := binary.Read(bytes.NewReader(p.Data), binary.LittleEndian, &headersLength); err != nil {
-		return nil, trace.Wrap(err)
+	if int(p.PacketID) != 1 {
+		headersLength = 0
+	} else {
+		if err := binary.Read(bytes.NewReader(p.Data), binary.LittleEndian, &headersLength); err != nil {
+			return nil, trace.Wrap(err)
+		}
 	}
 
+	//fmt.Println(hex.Dump(p.Raw.Bytes()))
+	//fmt.Println(hex.Dump(p.Data))
 	if int(headersLength) > len(p.Data) {
 		// TODO debug this case
-		fmt.Println("Got invalid packet:")
 		if err := DumpToFile(p); err != nil {
 			fmt.Println(err)
 

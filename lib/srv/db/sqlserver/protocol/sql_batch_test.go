@@ -24,6 +24,19 @@ func TestSQLBatch(t *testing.T) {
 
 }
 
+func TestSQLBatch2(t *testing.T) {
+	buff, err := os.ReadFile("/Users/marek/fpackets/207499594/1_packet.bin")
+	require.NoError(t, err)
+
+	p, err := ReadPacket(bytes.NewReader(buff))
+	require.NoError(t, err)
+
+	batch, err := ToSQLBatch(p)
+	require.NoError(t, err)
+	batch = batch
+
+}
+
 //func TestRPCRequest(t *testing.T) {
 //	buff, err := os.ReadFile("/Users/marek/packetsrpc/18/0_pkg.bin")
 //	require.NoError(t, err)

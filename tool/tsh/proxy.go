@@ -155,7 +155,7 @@ func onProxyCommandDB(cf *CLIConf) error {
 		return trace.Wrap(err)
 	}
 
-	addr := "localhost:0"
+	addr := "localhost:1433"
 	if cf.LocalProxyPort != "" {
 		addr = fmt.Sprintf("127.0.0.1:%s", cf.LocalProxyPort)
 	}

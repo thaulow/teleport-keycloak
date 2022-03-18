@@ -52,9 +52,9 @@ func TestRPCRequest2(t *testing.T) {
 
 		p, err := ReadRPCRequest2(bytes.NewReader(buff))
 		require.NoError(t, err)
-		require.NotEmpty(t, p.query)
+		require.NotEmpty(t, p.Query)
 		t.Log(d.Name())
-		t.Log(p.query)
+		t.Log(p.Query)
 		return nil
 	})
 }

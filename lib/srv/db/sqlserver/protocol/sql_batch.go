@@ -13,12 +13,68 @@ import (
 )
 
 type SQLBatch struct {
-	packet  Packet
+	*Packet
 	SQLText string
 }
 type pp struct {
 	Length  uint32
 	SQLText string
+}
+
+func ToSQLBatch(p *Packet) (*SQLBatch, error) {
+	if p.Type != PacketTypeSQLBatch {
+		return nil, trace.BadParameter("expected SQLBatch packet, got: %#v", p.Type)
+	}
+
+	var headersLength uint32
+	if err := binary.Read(bytes.NewReader(p.Data), binary.LittleEndian, &headersLength); err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	fmt.Println(hex.Dump(p.Data[:]))
+
+	s, err := mssql.ParseUCS2String(p.Data[headersLength:])
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	return &SQLBatch{
+		Packet:  p,
+		SQLText: s,
+	}, nil
+}
+
+func ToRPCRequest(p *Packet) (*RPCRequest, error) {
+	if p.Type != PacketTypeRPCRequest {
+		return nil, trace.BadParameter("expected SQLBatch packet, got: %#v", p.Type)
+	}
+
+	var headersLength uint32
+	if err := binary.Read(bytes.NewReader(p.Data), binary.LittleEndian, &headersLength); err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	kk := p.Data[headersLength+2:]
+	rr := bytes.NewReader(kk)
+
+	var rpcContent RPCContent
+	if err := binary.Read(rr, binary.LittleEndian, &rpcContent); err != nil {
+		return nil, trace.Wrap(err)
+	}
+
+	var ti typeInfo
+	if err := binary.Read(rr, binary.LittleEndian, &ti); err != nil {
+		return nil, trace.Wrap(err)
+	}
+	pp, err := readBVarChar(rr)
+	if err != nil {
+		panic(err)
+	}
+
+	return &RPCRequest{
+		Packet: p,
+		Query:  pp,
+	}, nil
 }
 
 func ReadSQLBatch(r io.Reader) (*SQLBatch, error) {
@@ -44,14 +100,14 @@ func ReadSQLBatch(r io.Reader) (*SQLBatch, error) {
 	}
 
 	return &SQLBatch{
-		packet:  *pkt,
+		Packet:  pkt,
 		SQLText: s,
 	}, nil
 }
 
 type RPCRequest struct {
-	packet Packet
-	query  string
+	*Packet
+	Query string
 }
 
 type ff struct {
@@ -221,8 +277,8 @@ func ReadRPCRequest2(r io.Reader) (*RPCRequest, error) {
 	}
 
 	return &RPCRequest{
-		packet: *pkt,
-		query:  pp,
+		Packet: pkt,
+		Query:  pp,
 	}, nil
 }
 

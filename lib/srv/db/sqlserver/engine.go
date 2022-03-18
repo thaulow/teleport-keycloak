@@ -18,6 +18,7 @@ package sqlserver
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 
@@ -151,14 +152,27 @@ func (e *Engine) receiveFromClient(clientConn, serverConn io.ReadWriteCloser, cl
 			return
 		}
 		switch p.Type {
-		// TODO add additional handlers
-		default:
-			_, err := serverConn.Write(p.Raw.Bytes())
+		case protocol.PacketTypeSQLBatch:
+			sqlBatch, err := protocol.ToSQLBatch(p)
 			if err != nil {
-				log.WithError(err).Error("Failed to write server packet.")
-				clientErrCh <- err
-				return
+				log.WithError(err).Error("failed to convert to SQLBatch")
+			} else {
+				fmt.Println(sqlBatch.SQLText)
 			}
+		case protocol.PacketTypeRPCRequest:
+			rpcRequest, err := protocol.ToRPCRequest(p)
+			if err != nil {
+				log.WithError(err).Error("failed to convert to RPCRequest")
+			} else {
+				fmt.Println(rpcRequest.Query)
+			}
+		default:
+		}
+		_, err = serverConn.Write(p.Raw.Bytes())
+		if err != nil {
+			log.WithError(err).Error("Failed to write server packet.")
+			clientErrCh <- err
+			return
 		}
 	}
 }

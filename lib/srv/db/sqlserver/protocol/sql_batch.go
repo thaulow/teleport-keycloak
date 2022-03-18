@@ -33,6 +33,14 @@ func ToSQLBatch(p *Packet) (*SQLBatch, error) {
 
 	fmt.Println(hex.Dump(p.Data[:]))
 
+	if int(headersLength) > len(p.Data) {
+		// TODO debug this case
+		fmt.Println("Got invalid packet:")
+		fmt.Println(hex.Dump(p.Raw.Bytes()))
+		return nil, trace.BadParameter("invalid headersLength size")
+
+	}
+
 	s, err := mssql.ParseUCS2String(p.Data[headersLength:])
 	if err != nil {
 		return nil, trace.Wrap(err)

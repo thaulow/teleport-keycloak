@@ -55,13 +55,18 @@ type Packet struct {
 
 	// Data is the packet data bytes without header.
 	Data []byte
+
+	// Raw packet bytes.
+	Raw bytes.Buffer
 }
 
 // ReadPacket reads a single full packet from the reader.
 func ReadPacket(r io.Reader) (*Packet, error) {
+	var buff bytes.Buffer
+	tr := io.TeeReader(r, &buff)
 	// Read 8-byte packet header.
 	var headerBytes [packetHeaderSize]byte
-	if _, err := io.ReadFull(r, headerBytes[:]); err != nil {
+	if _, err := io.ReadFull(tr, headerBytes[:]); err != nil {
 		return nil, trace.ConvertSystemError(err)
 	}
 
@@ -73,13 +78,14 @@ func ReadPacket(r io.Reader) (*Packet, error) {
 
 	// Read packet data. Packet length includes header.
 	dataBytes := make([]byte, header.Length-packetHeaderSize)
-	if _, err := io.ReadFull(r, dataBytes); err != nil {
+	if _, err := io.ReadFull(tr, dataBytes); err != nil {
 		return nil, trace.ConvertSystemError(err)
 	}
 
 	return &Packet{
 		PacketHeader: header,
 		Data:         dataBytes,
+		Raw:          buff,
 	}, nil
 }
 

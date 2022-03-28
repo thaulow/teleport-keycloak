@@ -94,10 +94,10 @@ for os in ${!supported_os_versions[@]}; do
 			done
 		done
 # 6. Publish repo
-			created_repos=(`aptly repo list -raw | grep "${os}-${os_version}"`)
-			components=`printf ",%.0s" $(seq $((${#created_repos[@]} - 1)))`
-			echo "Publishing repos ${created_repos[@]}..."
-			aptly publish repo -component="${components}" ${created_repos[@]} "${os}"
+		created_repos=(`aptly repo list -raw | grep "${os}-${os_version}"`)
+		components=`printf ",%.0s" $(seq $((${#created_repos[@]} - 1)))`
+		echo "Publishing repos ${created_repos[@]}..."
+		aptly publish repo -component="${components}" ${created_repos[@]} "${os}"
 	done
 done
 

@@ -2,8 +2,6 @@ package protocol
 
 import (
 	"bytes"
-	"encoding/hex"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -13,42 +11,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSQLBatch(t *testing.T) {
-	buff, err := os.ReadFile("/Users/marek/packets/6_pkg.bin")
-	require.NoError(t, err)
+func TestSQLBatchWalk(t *testing.T) {
+	filepath.WalkDir("/Users/marek/packets", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(d.Name(), "_pkg.bin") {
+			return nil
 
-	fmt.Println(hex.Dump(buff))
-	p, err := ReadSQLBatch(bytes.NewReader(buff))
-	require.NoError(t, err)
-	p = p
+		}
+		buff, err := os.ReadFile(path)
+		require.NoError(t, err)
 
+		p, err := ReadSQLBatch(bytes.NewReader(buff))
+		require.NoError(t, err)
+		require.NotEmpty(t, p.SQLText)
+		t.Log(d.Name())
+		t.Log(p.SQLText)
+		return nil
+	})
 }
 
-func TestSQLBatch2(t *testing.T) {
-	buff, err := os.ReadFile("/Users/marek/fpackets/207499594/1_packet.bin")
-	require.NoError(t, err)
-
-	p, err := ReadPacket(bytes.NewReader(buff))
-	require.NoError(t, err)
-
-	batch, err := ToSQLBatch(p)
-	require.NoError(t, err)
-	batch = batch
-
-}
-
-//func TestRPCRequest(t *testing.T) {
-//	buff, err := os.ReadFile("/Users/marek/packetsrpc/18/0_pkg.bin")
-//	require.NoError(t, err)
-//
-//	fmt.Println(hex.Dump(buff))
-//	p, err := ReadRPCRequest(bytes.NewReader(buff))
-//	require.NoError(t, err)
-//	p = p
-//
-//}
-
-func TestRPCRequest2(t *testing.T) {
+func TestRPCRequestWalk(t *testing.T) {
 	filepath.WalkDir("/Users/marek/packetsrpc/", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -70,14 +57,4 @@ func TestRPCRequest2(t *testing.T) {
 		t.Log(p.Query)
 		return nil
 	})
-}
-
-func TestFoo(t *testing.T) {
-	var buff bytes.Buffer
-	buff.Write([]byte{1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1})
-	err := writeBVarChar(&buff, "select @@version")
-	require.NoError(t, err)
-
-	fmt.Println(hex.Dump(buff.Bytes()))
-
 }

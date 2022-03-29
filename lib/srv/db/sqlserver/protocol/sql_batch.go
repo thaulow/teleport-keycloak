@@ -11,7 +11,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode/utf16"
 
 	mssql "github.com/denisenkom/go-mssqldb"
 	"github.com/gravitational/trace"
@@ -156,74 +155,6 @@ type RPCRequest struct {
 	Query string
 }
 
-type ff struct {
-	idswitch uint16
-	procID   uint16
-}
-
-//func ReadRPCRequest(r io.Reader) (*RPCRequest, error) {
-//	pkt, err := ReadPacket(r)
-//	if err != nil {
-//		return nil, trace.Wrap(err)
-//	}
-//
-//	if pkt.Type != PacketTypeRPCRequest {
-//		return nil, trace.BadParameter("expected SQLBatch packet, got: %#v", pkt)
-//	}
-//
-//	var headersLength uint32
-//	if err := binary.Read(bytes.NewReader(pkt.Data), binary.LittleEndian, &headersLength); err != nil {
-//		return nil, trace.Wrap(err)
-//	}
-//
-//	var idswitch uint16
-//	rr := bytes.NewBuffer(pkt.Data[headersLength+2:])
-//	if err != nil {
-//		panic(err)
-//	}
-//
-//	var kk [2]byte
-//	rr.Read(kk[:])
-//
-//	fmt.Println(hex.Dump(kk[:]))
-//
-//	if err := binary.Read(bytes.NewReader(kk[:]), binary.LittleEndian, &idswitch); err != nil {
-//		return nil, trace.Wrap(err)
-//	}
-//
-//	var flags uint16
-//	if err := binary.Read(rr, binary.LittleEndian, &flags); err != nil {
-//		return nil, trace.Wrap(err)
-//	}
-//
-//	var nameLength uint8
-//	if err := binary.Read(rr, binary.LittleEndian, &nameLength); err != nil {
-//		return nil, trace.Wrap(err)
-//	}
-//	nameLength = nameLength
-//
-//	var flagsParam uint8
-//	if err := binary.Read(rr, binary.LittleEndian, &flagsParam); err != nil {
-//		return nil, trace.Wrap(err)
-//	}
-//	flagsParam = flagsParam
-//
-//	var ti typeInfo
-//	if err := binary.Read(rr, binary.LittleEndian, &ti); err != nil {
-//		return nil, trace.Wrap(err)
-//	}
-//
-//	pp, err := readBVarChar(rr)
-//	if err != nil {
-//		panic(err)
-//	}
-//	pp = pp
-//
-//	return &RPCRequest{
-//		packet: *pkt,
-//	}, nil
-//}
-
 type Collation struct {
 	LcidAndFlags uint32
 	SortId       uint8
@@ -238,20 +169,6 @@ type typeInfo struct {
 	SortID      uint8
 }
 
-func writeBVarChar(w io.Writer, s string) (err error) {
-	buf := str2ucs2(s)
-	var numchars int = len(buf) / 2
-	if numchars > 0xff {
-		panic("invalid size for B_VARCHAR")
-	}
-	err = binary.Write(w, binary.LittleEndian, uint8(numchars))
-	if err != nil {
-		return
-	}
-	_, err = w.Write(buf)
-	return
-}
-
 func readBVarChar(r io.Reader) (res string, err error) {
 	var numchars uint16
 	if err := binary.Read(r, binary.LittleEndian, &numchars); err != nil {
@@ -261,16 +178,6 @@ func readBVarChar(r io.Reader) (res string, err error) {
 		return "", nil
 	}
 	return readUcs2(r, int(numchars))
-}
-
-func str2ucs2(s string) []byte {
-	res := utf16.Encode([]rune(s))
-	ucs2 := make([]byte, 2*len(res))
-	for i := 0; i < len(res); i++ {
-		ucs2[2*i] = byte(res[i])
-		ucs2[2*i+1] = byte(res[i] >> 8)
-	}
-	return ucs2
 }
 
 func readUcs2(r io.Reader, numchars int) (res string, err error) {
@@ -338,12 +245,6 @@ func (t tdsReader) byte() byte {
 		panic(err)
 	}
 	return b
-}
-
-func newTdsReader(buff []byte) *tdsReader {
-	return &tdsReader{
-		Reader: bytes.NewReader(buff),
-	}
 }
 
 const (

@@ -530,3 +530,7 @@ func (f *fakeServer) GetRestrictedSessionManager() restricted.Manager {
 func (f *fakeServer) GetLockWatcher() *services.LockWatcher {
 	return nil
 }
+
+func (f *fakeServer) GetCreateHostUser() bool {
+	return false
+}

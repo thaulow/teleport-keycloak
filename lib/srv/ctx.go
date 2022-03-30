@@ -164,6 +164,10 @@ type Server interface {
 
 	// GetLockWatcher gets the server's lock watcher.
 	GetLockWatcher() *services.LockWatcher
+
+	// GetCreateHostUser returns whether the node should create
+	// temporary teleport users or not
+	GetCreateHostUser() bool
 }
 
 // IdentityContext holds all identity information associated with the user

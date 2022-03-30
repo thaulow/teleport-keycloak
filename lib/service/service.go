@@ -1948,6 +1948,7 @@ func (process *TeleportProcess) initSSH() error {
 			regular.SetAllowTCPForwarding(cfg.SSH.AllowTCPForwarding),
 			regular.SetLockWatcher(lockWatcher),
 			regular.SetX11ForwardingConfig(cfg.SSH.X11),
+			regular.SetCreateHostUser(!cfg.SSH.DisableCreateHostUser),
 		)
 		if err != nil {
 			return trace.Wrap(err)

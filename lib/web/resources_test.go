@@ -114,6 +114,7 @@ spec:
   deny: {}
   options:
     cert_format: standard
+    create_host_user: false
     desktop_clipboard: true
     enhanced_recording:
     - command

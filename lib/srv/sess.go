@@ -80,6 +80,10 @@ type SessionRegistry struct {
 	srv Server
 
 	auth auth.ClientI
+
+	// users is used for automatic user creation when new sessions are
+	// started
+	users HostUsers
 }
 
 func NewSessionRegistry(srv Server, auth auth.ClientI) (*SessionRegistry, error) {
@@ -96,6 +100,11 @@ func NewSessionRegistry(srv Server, auth auth.ClientI) (*SessionRegistry, error)
 		return nil, trace.BadParameter("auth client is required")
 	}
 
+	users, err := NewHostUsers(srv.Context())
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
 	return &SessionRegistry{
 		log: log.WithFields(log.Fields{
 			trace.Component: teleport.Component(teleport.ComponentSession, srv.Component()),
@@ -103,6 +112,7 @@ func NewSessionRegistry(srv Server, auth auth.ClientI) (*SessionRegistry, error)
 		srv:      srv,
 		sessions: make(map[rsession.ID]*session),
 		auth:     auth,
+		users:    users,
 	}, nil
 }
 
@@ -215,6 +225,20 @@ func (s *SessionRegistry) OpenSession(ch ssh.Channel, req *ssh.Request, ctx *Ser
 
 		return nil
 	}
+
+	if s.srv.GetCreateHostUser() {
+		if ui := ctx.Identity.RoleSet.HostUsers(s.srv.GetInfo()); ui != nil {
+			userCloser, err := s.users.CreateUser(ctx.Identity.Login, ui)
+			if err != nil && !trace.IsAlreadyExists(err) {
+				log.Debug("Error creating user, already exists: ", err)
+				return trace.Wrap(err)
+			}
+			if userCloser != nil {
+				ctx.AddCloser(userCloser)
+			}
+		}
+	}
+
 	// session not found? need to create one. start by getting/generating an ID for it
 	sid, found := ctx.GetEnv(sshutils.SessionEnvVar)
 	if !found {
@@ -1703,7 +1727,7 @@ func (p *party) Close() (err error) {
 		close(p.termSizeC)
 		err = p.ch.Close()
 	})
-	return err
+	return trace.Wrap(err)
 }
 
 func (s *session) trackerGet() (types.SessionTracker, error) {

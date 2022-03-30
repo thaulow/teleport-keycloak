@@ -194,6 +194,7 @@ func TestRoleParse(t *testing.T) {
 						RecordSession:     &types.RecordSession{Desktop: types.NewBoolOption(true)},
 						BPF:               apidefaults.EnhancedEvents(),
 						DesktopClipboard:  types.NewBoolOption(true),
+						CreateHostUser:    types.NewBoolOption(false),
 					},
 					Allow: types.RoleConditions{
 						NodeLabels:       types.Labels{},
@@ -227,6 +228,7 @@ func TestRoleParse(t *testing.T) {
 						RecordSession:     &types.RecordSession{Desktop: types.NewBoolOption(true)},
 						BPF:               apidefaults.EnhancedEvents(),
 						DesktopClipboard:  types.NewBoolOption(true),
+						CreateHostUser:    types.NewBoolOption(false),
 					},
 					Allow: types.RoleConditions{
 						Namespaces: []string{apidefaults.Namespace},
@@ -296,6 +298,7 @@ func TestRoleParse(t *testing.T) {
 						DisconnectExpiredCert: types.NewBool(true),
 						BPF:                   apidefaults.EnhancedEvents(),
 						DesktopClipboard:      types.NewBoolOption(true),
+						CreateHostUser:        types.NewBoolOption(false),
 					},
 					Allow: types.RoleConditions{
 						NodeLabels:       types.Labels{"a": []string{"b"}, "c-d": []string{"e"}},
@@ -381,6 +384,7 @@ func TestRoleParse(t *testing.T) {
 						DisconnectExpiredCert: types.NewBool(false),
 						BPF:                   apidefaults.EnhancedEvents(),
 						DesktopClipboard:      types.NewBoolOption(true),
+						CreateHostUser:        types.NewBoolOption(false),
 					},
 					Allow: types.RoleConditions{
 						NodeLabels:       types.Labels{"a": []string{"b"}},
@@ -453,6 +457,7 @@ func TestRoleParse(t *testing.T) {
 						DisconnectExpiredCert: types.NewBool(false),
 						BPF:                   apidefaults.EnhancedEvents(),
 						DesktopClipboard:      types.NewBoolOption(true),
+						CreateHostUser:        types.NewBoolOption(false),
 					},
 					Allow: types.RoleConditions{
 						NodeLabels: types.Labels{
@@ -4113,6 +4118,188 @@ func TestCheckKubeGroupsAndUsers(t *testing.T) {
 
 			require.ElementsMatch(t, tc.wantUsers, gotUsers)
 			require.ElementsMatch(t, tc.wantGroups, gotGroups)
+		})
+	}
+}
+
+func TestHostUsers_getGroups(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		test   string
+		groups []string
+		roles  RoleSet
+		server types.Server
+	}{
+		{
+			test:   "test exact match, one group, one role",
+			groups: []string{"group"},
+			roles: NewRoleSet(&types.RoleV5{
+				Spec: types.RoleSpecV5{
+					Options: types.RoleOptions{
+						CreateHostUser: types.NewBoolOption(true),
+					},
+					Allow: types.RoleConditions{
+						NodeLabels: types.Labels{"success": []string{"abc"}},
+						HostGroups: []string{"group"},
+					},
+				},
+			}),
+			server: &types.ServerV2{
+				Metadata: types.Metadata{
+
+					Labels: map[string]string{
+						"success": "abc",
+					},
+				},
+			},
+		},
+		{
+			test:   "multiple roles, one no match",
+			groups: []string{"group1", "group2"},
+			roles: NewRoleSet(&types.RoleV5{
+				Spec: types.RoleSpecV5{
+					Options: types.RoleOptions{
+						CreateHostUser: types.NewBoolOption(true),
+					},
+					Allow: types.RoleConditions{
+						NodeLabels: types.Labels{"success": []string{"abc"}},
+						HostGroups: []string{"group1"},
+					},
+				},
+			}, &types.RoleV5{
+				Spec: types.RoleSpecV5{
+					Options: types.RoleOptions{
+						CreateHostUser: types.NewBoolOption(true),
+					},
+					Allow: types.RoleConditions{
+						NodeLabels: types.Labels{types.Wildcard: []string{types.Wildcard}},
+						HostGroups: []string{"group2"},
+					},
+				},
+			}, &types.RoleV5{
+				Spec: types.RoleSpecV5{
+					Allow: types.RoleConditions{
+						NodeLabels: types.Labels{"fail": []string{"abc"}},
+						HostGroups: []string{"notpresentgroup"},
+					},
+				},
+			}),
+			server: &types.ServerV2{
+				Metadata: types.Metadata{
+					Labels: map[string]string{
+						"success": "abc",
+					},
+				},
+			},
+		},
+	} {
+		t.Run(tc.test, func(t *testing.T) {
+			require.Equal(t, tc.groups, tc.roles.HostUsers(tc.server).Groups)
+		})
+	}
+}
+
+func TestHostUsers_CanCreateHostUser(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		test      string
+		canCreate bool
+		roles     RoleSet
+		server    types.Server
+	}{
+		{
+			test:      "test exact match, one role, can create",
+			canCreate: true,
+			roles: NewRoleSet(&types.RoleV5{
+				Spec: types.RoleSpecV5{
+					Options: types.RoleOptions{
+						CreateHostUser: types.NewBoolOption(true),
+					},
+					Allow: types.RoleConditions{
+						NodeLabels: types.Labels{"success": []string{"abc"}},
+					},
+				},
+			}),
+			server: &types.ServerV2{
+				Metadata: types.Metadata{
+					Labels: map[string]string{
+						"success": "abc",
+					},
+				},
+			},
+		},
+		{
+			test:      "test two roles, 1 exact match, one can create",
+			canCreate: false,
+			roles: NewRoleSet(&types.RoleV5{
+				Spec: types.RoleSpecV5{
+					Options: types.RoleOptions{
+						CreateHostUser: types.NewBoolOption(true),
+					},
+					Allow: types.RoleConditions{
+						NodeLabels: types.Labels{"success": []string{"abc"}},
+					},
+				},
+			}, &types.RoleV5{
+				Spec: types.RoleSpecV5{
+					Options: types.RoleOptions{
+						CreateHostUser: types.NewBoolOption(false),
+					},
+					Allow: types.RoleConditions{
+						NodeLabels: types.Labels{"success": []string{"abc"}},
+					},
+				},
+			}),
+			server: &types.ServerV2{
+				Metadata: types.Metadata{
+					Labels: map[string]string{
+						"success": "abc",
+					},
+				},
+			},
+		},
+		{
+			test:      "test three roles, 2 exact match, both can create",
+			canCreate: true,
+			roles: NewRoleSet(&types.RoleV5{
+				Spec: types.RoleSpecV5{
+					Options: types.RoleOptions{
+						CreateHostUser: types.NewBoolOption(true),
+					},
+					Allow: types.RoleConditions{
+						NodeLabels: types.Labels{"success": []string{"abc"}},
+					},
+				},
+			}, &types.RoleV5{
+				Spec: types.RoleSpecV5{
+					Options: types.RoleOptions{
+						CreateHostUser: types.NewBoolOption(true),
+					},
+					Allow: types.RoleConditions{
+						NodeLabels: types.Labels{"success": []string{"abc"}},
+					},
+				},
+			}, &types.RoleV5{
+				Spec: types.RoleSpecV5{
+					Options: types.RoleOptions{
+						CreateHostUser: types.NewBoolOption(false),
+					},
+					Allow: types.RoleConditions{
+						NodeLabels: types.Labels{"unmatched": []string{"abc"}},
+					},
+				},
+			}),
+			server: &types.ServerV2{
+				Metadata: types.Metadata{
+					Labels: map[string]string{
+						"success": "abc",
+					},
+				},
+			},
+		},
+	} {
+		t.Run(tc.test, func(t *testing.T) {
+			require.Equal(t, tc.canCreate, tc.roles.HostUsers(tc.server) != nil)
 		})
 	}
 }

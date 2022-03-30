@@ -173,6 +173,11 @@ func (m *mockServer) GetLockWatcher() *services.LockWatcher {
 	return nil
 }
 
+// GetLockWatcher gets the server's lock watcher.
+func (m *mockServer) GetCreateHostUser() bool {
+	return false
+}
+
 func TestSession_newRecorder(t *testing.T) {
 	proxyRecording, err := types.NewSessionRecordingConfigFromConfigFile(types.SessionRecordingConfigSpecV2{
 		Mode: types.RecordAtProxy,

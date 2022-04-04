@@ -2595,7 +2595,8 @@ func (process *TeleportProcess) setupProxyListeners(networkingConfig types.Clust
 
 	tunnelStrategy, err := networkingConfig.GetTunnelStrategyType()
 	if err != nil {
-		return nil, trace.Wrap(err)
+		process.log.WithError(err).Warn("Failed to get tunnel strategy. Falling back to agent mesh strategy.")
+		tunnelStrategy = types.AgentMesh
 	}
 
 	if !cfg.Proxy.DisableReverseTunnel && tunnelStrategy == types.ProxyPeering {
@@ -3255,11 +3256,11 @@ func (process *TeleportProcess) initProxyEndpoint(conn *Connector) error {
 	if alpnRouter != nil {
 		grpcServer = grpc.NewServer(
 			grpc.ChainUnaryInterceptor(
-				utils.GRPCServerUnaryErrorInterceptor ,
+				utils.GRPCServerUnaryErrorInterceptor,
 				proxyLimiter.UnaryServerInterceptor(),
 			),
 			grpc.ChainStreamInterceptor(
-				utils.GRPCServerStreamErrorInterceptor ,
+				utils.GRPCServerStreamErrorInterceptor,
 				proxyLimiter.StreamServerInterceptor,
 			),
 		)

@@ -34,6 +34,7 @@ import (
 	"github.com/gravitational/teleport/lib/defaults"
 	"github.com/gravitational/teleport/lib/events"
 	"github.com/gravitational/teleport/lib/limiter"
+	"github.com/gravitational/teleport/lib/proxy"
 	"github.com/gravitational/teleport/lib/services"
 	"github.com/gravitational/teleport/lib/sshca"
 	"github.com/gravitational/teleport/lib/sshutils"
@@ -201,6 +202,9 @@ type Config struct {
 	// and above.
 	NewCachingAccessPointOldProxy auth.NewRemoteProxyCachingAccessPoint
 
+	// PeerClient is a client to peer proxy servers.
+	PeerClient *proxy.Client
+
 	// LockWatcher is a lock watcher.
 	LockWatcher *services.LockWatcher
 }
@@ -307,7 +311,7 @@ func NewServer(cfg Config) (Server, error) {
 	}
 
 	for _, clusterInfo := range cfg.DirectClusters {
-		cluster, err := newlocalSite(srv, clusterInfo.Name, clusterInfo.Client)
+		cluster, err := newlocalSite(srv, clusterInfo.Name, clusterInfo.Client, srv.PeerClient)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}

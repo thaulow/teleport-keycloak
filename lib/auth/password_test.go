@@ -403,7 +403,7 @@ func TestChangeUserAuthentication(t *testing.T) {
 			},
 		},
 		{
-			name: "with second factor webauthn",
+			name: "with passwordless",
 			setAuthPreference: func() {
 				authPreference, err := types.NewAuthPreference(types.AuthPreferenceSpecV2{
 					Type:         constants.Local,
@@ -422,16 +422,17 @@ func TestChangeUserAuthentication(t *testing.T) {
 
 				return &proto.ChangeUserAuthenticationRequest{
 					TokenID:                resetTokenID,
-					NewPassword:            []byte("password3"),
+					NewPassword:            []byte("password3"), // should not be set even if provided
 					NewMFARegisterResponse: webauthnRes,
+					Passwordless:           true,
 				}
 			},
-			// Invalid totp fields when auth settings set to only webauthn.
+			// Missing webauthn for passwordless.
 			getInvalidReq: func(resetTokenID string) *proto.ChangeUserAuthenticationRequest {
 				return &proto.ChangeUserAuthenticationRequest{
 					TokenID:                resetTokenID,
-					NewPassword:            []byte("password3"),
 					NewMFARegisterResponse: &proto.MFARegisterResponse{Response: &proto.MFARegisterResponse_TOTP{}},
+					Passwordless:           true,
 				}
 			},
 		},
@@ -507,15 +508,25 @@ func TestChangeUserAuthentication(t *testing.T) {
 				invalidReq := c.getInvalidReq(token.GetName())
 				_, err = srv.Auth().changeUserAuthentication(ctx, invalidReq)
 				require.True(t, trace.IsBadParameter(err))
+
+				if invalidReq.Passwordless {
+					require.Contains(t, err.Error(), "passwordless")
+				}
 			}
 
 			validReq := c.getReq(token.GetName())
 			_, err = srv.Auth().changeUserAuthentication(ctx, validReq)
 			require.NoError(t, err)
 
-			// Test password is updated.
-			err = srv.Auth().checkPasswordWOToken(username, validReq.NewPassword)
-			require.NoError(t, err)
+			if validReq.Passwordless {
+				// Password should not have changed.
+				err := srv.Auth().checkPasswordWOToken(username, validReq.NewPassword)
+				require.Error(t, err)
+			} else {
+				// Check password was changed.
+				err := srv.Auth().checkPasswordWOToken(username, validReq.NewPassword)
+				require.NoError(t, err)
+			}
 		})
 	}
 }

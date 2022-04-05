@@ -1536,6 +1536,8 @@ type changeUserAuthenticationRequest struct {
 	Password []byte `json:"password"`
 	// WebauthnCreationResponse is the signed credential creation response.
 	WebauthnCreationResponse *wanlib.CredentialCreationResponse `json:"webauthnCreationResponse"`
+	// Passwordless explicitly requests to change authn to passwordless only.
+	Passwordless bool `json:"passwordless"`
 }
 
 func (h *Handler) changeUserAuthentication(w http.ResponseWriter, r *http.Request, p httprouter.Params) (interface{}, error) {
@@ -1545,8 +1547,9 @@ func (h *Handler) changeUserAuthentication(w http.ResponseWriter, r *http.Reques
 	}
 
 	protoReq := &proto.ChangeUserAuthenticationRequest{
-		TokenID:     req.TokenID,
-		NewPassword: req.Password,
+		TokenID:      req.TokenID,
+		NewPassword:  req.Password,
+		Passwordless: req.Passwordless,
 	}
 	switch {
 	case req.WebauthnCreationResponse != nil:

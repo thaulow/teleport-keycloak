@@ -4,9 +4,23 @@ description: Introduction to features and benefits of using Teleport Enterprise.
 h1: Teleport Enterprise
 ---
 
-This section will give an overview of Teleport Enterprise, the commercial product built around
- Teleport Open Source core. For those that want to jump right in, you can play
-with the [Getting Started Guide for Teleport Enterprise](getting-started.mdx).
+Teleport Enterprise is a commercial product built around Teleport's open source
+core. For those that want to jump right in, you can play with the
+[Getting Started Guide for Teleport Enterprise](getting-started.mdx).
+
+<ScopedBlock scope="oss">
+<TileSet>
+<ScopeSwitchTile
+title="Learn more about Teleport Enterprise"
+scope="enterprise"
+icon="enterprise"
+>
+Get more information about the advanced features available in Teleport Enterprise.
+</ScopeSwitchTile>
+</TileSet>
+</ScopedBlock>
+
+<ScopedBlock scope={["cloud", "enterprise"]}>
 
 The table below gives a quick overview of the benefits of Teleport Enterprise.
 
@@ -83,3 +97,5 @@ See [Access Requests Guide for more information](workflow/index.mdx)
 ## License file
 
 Commercial Teleport subscriptions require a valid license. See [Enterprise License File](./license.mdx) for how to manage the file in your Teleport Enterprise deployment.
+
+</ScopedBlock>

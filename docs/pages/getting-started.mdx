@@ -4,7 +4,23 @@ description: Getting started with Teleport - identity-aware access plane for SSH
 layout: tocless-doc
 ---
 
+Follow these guides to get started using Teleport.
+
 <TileSet>
+<ScopedBlock scope={["cloud", "enterprise"]}>
+
+  <ScopeSwitchTile 
+  icon="stack"
+  title="Get started with Open Source Teleport"
+  scope="oss"
+  >
+  Learn how to host your own open source Teleport deployment.
+  </ScopeSwitchTile>
+
+</ScopedBlock>
+
+<ScopedBlock scope={["oss"]}>
+
   <Tile icon="server" title="Linux" href="./getting-started/linux-server.mdx">
     Get started with Teleport on a standalone Linux server.
   </Tile>
@@ -14,6 +30,8 @@ layout: tocless-doc
   <Tile icon="kubernetes" title="Kubernetes" href="./kubernetes-access/getting-started/local.mdx">
     Get started with Teleport and Kubernetes.
   </Tile>
+
+</ScopedBlock>
   <Tile icon="cloud" title="Cloud" href="https://goteleport.com/signup">
     Try Teleport hosted by us in the cloud for free.
   </Tile>

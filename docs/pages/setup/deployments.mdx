@@ -4,6 +4,29 @@ description: Teleport Installation and Configuration Reference Deployment Guides
 layout: tocless-doc
 ---
 
+These guides show you how to set up a full self-hosted Teleport deployment on
+the platform of your choice.
+
+<ScopedBlock scope={["cloud"]}>
+<TileSet>
+    <ScopeSwitchTile 
+    icon="wrench"
+    title="Get started with Open Source Teleport"
+    scope="oss"
+  >
+    Learn how to host your own open source Teleport deployment.
+    </ScopeSwitchTile>
+    <ScopeSwitchTile 
+    icon="wrench"
+    title="Get started with Teleport Enterprise"
+    scope="enterprise"
+  >
+    Learn how to host your own Teleport Enterprise deployment.
+    </ScopeSwitchTile>
+  </TileSet>
+</ScopedBlock>
+
+<ScopedBlock scope={["oss", "enterprise"]}>
 <ul>
   <li>
     [AWS Terraform](./deployments/aws-terraform.mdx). Deploy HA Teleport with Terraform Provider on AWS.
@@ -15,3 +38,4 @@ layout: tocless-doc
     [IBM Cloud](./deployments/ibm.mdx). Deploy HA Teleport on IBM cloud.
   </li>
 </ul>
+</ScopedBlock>

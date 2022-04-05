@@ -7,6 +7,27 @@ h1: Single Sign-On (SSO) for SSH
 Users of the Enterprise edition of Teleport can login with SSH, Kubernetes, Databases and Web applications
 through a Single Sign-On (SSO) provider used the rest of the organization.
 
+<ScopedBlock scope="oss">
+<TileSet>
+    <ScopeSwitchTile 
+    icon="bolt"
+    title="Use SSO with Teleport Cloud"
+    scope="cloud"
+  >
+    Learn how to use Teleport's SSO integrations in Teleport Cloud.
+    </ScopeSwitchTile>
+    <ScopeSwitchTile 
+    icon="bolt"
+    title="Use SSO with Teleport Enterprise"
+    scope="enterprise"
+  >
+    Learn how to use Teleport's SSO integrations in Teleport Enterprise.
+    </ScopeSwitchTile>
+  </TileSet>
+</ScopedBlock>
+
+<ScopedBlock scope={["enterprise", "cloud"]}>
+
 <TileSet>
   <Tile icon="bolt" title="Azure Active Directory (AD)" href="./sso/azuread.mdx">
     Configure Azure Active Directory SSO for SSH, Kubernetes, databases, desktops and web apps.
@@ -30,6 +51,8 @@ through a Single Sign-On (SSO) provider used the rest of the organization.
     Configure Okta SSO for SSH, Kubernetes, databases, desktops and web apps.
   </Tile>
 </TileSet>
+
+</ScopedBlock>
 
 ## How does SSO work?
 

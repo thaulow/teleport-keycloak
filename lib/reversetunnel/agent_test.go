@@ -20,6 +20,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -139,7 +140,7 @@ func (m *mockAgentInjection) DialContext(context.Context, utils.NetAddr) (SSHCli
 	return m.client, nil
 }
 
-func testAgent(t *testing.T) (*Agent, *mockSSHClient) {
+func testAgent(t *testing.T) (*agent, *mockSSHClient) {
 	tracker, err := track.New(context.Background(), track.Config{
 		ClusterName: "test",
 	})
@@ -178,9 +179,9 @@ func TestAgentFailedToClaimLease(t *testing.T) {
 	agent, client := testAgent(t)
 	claimedProxy := "claimed-proxy"
 
-	var calls int
-	agent.stateCallback = func(a *Agent) {
-		calls++
+	var calls int64
+	agent.stateCallback = func(a Agent) {
+		atomic.AddInt64(&calls, 1)
 	}
 
 	agent.tracker.Claim(claimedProxy)
@@ -199,10 +200,10 @@ func TestAgentFailedToClaimLease(t *testing.T) {
 func TestAgentStart(t *testing.T) {
 	agent, client := testAgent(t)
 
-	var calls int
+	var calls int64
 	states := make(chan AgentState)
-	agent.stateCallback = func(a *Agent) {
-		calls++
+	agent.stateCallback = func(a Agent) {
+		atomic.AddInt64(&calls, 1)
 		states <- a.GetState()
 	}
 

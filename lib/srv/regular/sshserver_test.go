@@ -1174,9 +1174,6 @@ func TestProxyRoundRobin(t *testing.T) {
 	up, err := newUpack(f.testSrv, f.user, []string{f.user}, wildcardAllow)
 	require.NoError(t, err)
 
-	// start agent and load balance requests
-	events := make(chan reversetunnel.Agent, 2)
-
 	resolver := func() (*utils.NetAddr, error) {
 		return &utils.NetAddr{Addr: reverseTunnelAddress.Addr, AddrNetwork: "tcp"}, nil
 	}
@@ -1188,9 +1185,6 @@ func TestProxyRoundRobin(t *testing.T) {
 		HostSigner:  f.signer,
 		HostUUID:    fmt.Sprintf("%v.%v", hostID, f.testSrv.ClusterName()),
 		Cluster:     "remote",
-		StateCallback: func(a reversetunnel.Agent) {
-			events <- a
-		},
 	})
 	require.NoError(t, err)
 
@@ -1205,26 +1199,12 @@ func TestProxyRoundRobin(t *testing.T) {
 		HostSigner:  f.signer,
 		HostUUID:    fmt.Sprintf("%v.%v", hostID, f.testSrv.ClusterName()),
 		Cluster:     "remote",
-		StateCallback: func(a reversetunnel.Agent) {
-			events <- a
-		},
 	})
 	require.NoError(t, err)
 
 	err = pool2.Start()
 	require.NoError(t, err)
 	defer pool2.Stop()
-
-	// We should receive two events when each pool connects an agent.
-	timeout := time.After(time.Second)
-	for i := 0; i < 2; i++ {
-		select {
-		case <-timeout:
-			require.FailNow(t, "timeout waiting for agents to connect")
-		case agent := <-events:
-			require.Equal(t, agent.GetState(), reversetunnel.AgentConnected)
-		}
-	}
 
 	sshConfig := &ssh.ClientConfig{
 		User:            f.user,

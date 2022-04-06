@@ -180,7 +180,7 @@ func (process *TeleportProcess) initWindowsDesktopServiceRegistered(log *logrus.
 				log.Debugf("Ignoring unsupported cluster name %q.", info.ServerName)
 			}
 		}
-		pool, err := auth.ClientCertPool(accessPoint, clusterName)
+		pool, err := auth.DefaultClientCertPool(accessPoint, clusterName)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
@@ -226,6 +226,7 @@ func (process *TeleportProcess) initWindowsDesktopServiceRegistered(log *logrus.
 		LDAPConfig:           desktop.LDAPConfig(cfg.WindowsDesktop.LDAP),
 		DiscoveryBaseDN:      cfg.WindowsDesktop.Discovery.BaseDN,
 		DiscoveryLDAPFilters: cfg.WindowsDesktop.Discovery.Filters,
+		Hostname:             cfg.Hostname,
 	})
 	if err != nil {
 		return trace.Wrap(err)

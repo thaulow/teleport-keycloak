@@ -24,9 +24,10 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -62,6 +63,7 @@ import (
 	"github.com/gravitational/teleport/lib/backend/firestore"
 	"github.com/gravitational/teleport/lib/backend/lite"
 	"github.com/gravitational/teleport/lib/backend/memory"
+	"github.com/gravitational/teleport/lib/backend/postgres"
 	"github.com/gravitational/teleport/lib/bpf"
 	"github.com/gravitational/teleport/lib/cache"
 	"github.com/gravitational/teleport/lib/defaults"
@@ -228,7 +230,7 @@ type Connector struct {
 	// and x509 certificates to clients.
 	ServerIdentity *auth.Identity
 
-	// Client is authenticated client with credentials from ClientIdenity.
+	// Client is authenticated client with credentials from ClientIdentity.
 	Client *auth.Client
 }
 
@@ -627,8 +629,18 @@ func NewTeleport(cfg *Config) (*TeleportProcess, error) {
 	if os.IsNotExist(err) {
 		err := os.MkdirAll(cfg.DataDir, os.ModeDir|0700)
 		if err != nil {
+			if errors.Is(err, fs.ErrPermission) {
+				cfg.Log.Errorf("Teleport does not have permission to write to: %v. Ensure that you are running as a user with appropriate permissions.", cfg.DataDir)
+			}
 			return nil, trace.ConvertSystemError(err)
 		}
+	}
+
+	// TODO(espadolini): DELETE IN 11.0, replace with
+	// os.RemoveAll(filepath.Join(cfg.DataDir, "cache")), because no stable v10
+	// should ever use the cache directory, and 11 requires upgrading from 10
+	if fi, err := os.Stat(filepath.Join(cfg.DataDir, "cache")); err == nil && fi.IsDir() {
+		cfg.Log.Warnf("An old cache directory exists at %q. It can be safely deleted after ensuring that no other Teleport instance is running.", filepath.Join(cfg.DataDir, "cache"))
 	}
 
 	if len(cfg.FileDescriptors) == 0 {
@@ -643,6 +655,9 @@ func NewTeleport(cfg *Config) (*TeleportProcess, error) {
 	cfg.HostUUID, err = utils.ReadHostUUID(cfg.DataDir)
 	if err != nil {
 		if !trace.IsNotFound(err) {
+			if errors.Is(err, fs.ErrPermission) {
+				cfg.Log.Errorf("Teleport does not have permission to write to: %v. Ensure that you are running as a user with appropriate permissions.", cfg.DataDir)
+			}
 			return nil, trace.Wrap(err)
 		}
 		if len(cfg.Identities) != 0 {
@@ -663,6 +678,9 @@ func NewTeleport(cfg *Config) (*TeleportProcess, error) {
 			cfg.Log.Infof("Generating new host UUID: %v.", cfg.HostUUID)
 		}
 		if err := utils.WriteHostUUID(cfg.DataDir, cfg.HostUUID); err != nil {
+			if errors.Is(err, fs.ErrPermission) {
+				cfg.Log.Errorf("Teleport does not have permission to write to: %v. Ensure that you are running as a user with appropriate permissions.", cfg.DataDir)
+			}
 			return nil, trace.Wrap(err)
 		}
 	}
@@ -1128,10 +1146,7 @@ func (process *TeleportProcess) initAuthService() error {
 	} else {
 		// check if session recording has been disabled. note, we will continue
 		// logging audit events, we just won't record sessions.
-		recordSessions := true
 		if cfg.Auth.SessionRecordingConfig.GetMode() == types.RecordOff {
-			recordSessions = false
-
 			warningMessage := "Warning: Teleport session recording have been turned off. " +
 				"This is dangerous, you will not be able to save and playback sessions."
 			process.log.Warn(warningMessage)
@@ -1161,12 +1176,11 @@ func (process *TeleportProcess) initAuthService() error {
 		}
 
 		auditServiceConfig := events.AuditLogConfig{
-			Context:        process.ExitContext(),
-			DataDir:        filepath.Join(cfg.DataDir, teleport.LogsDir),
-			RecordSessions: recordSessions,
-			ServerID:       cfg.HostUUID,
-			UploadHandler:  uploadHandler,
-			ExternalLog:    externalLog,
+			Context:       process.ExitContext(),
+			DataDir:       filepath.Join(cfg.DataDir, teleport.LogsDir),
+			ServerID:      cfg.HostUUID,
+			UploadHandler: uploadHandler,
+			ExternalLog:   externalLog,
 		}
 		auditServiceConfig.UID, auditServiceConfig.GID, err = adminCreds()
 		if err != nil {
@@ -1307,7 +1321,6 @@ func (process *TeleportProcess) initAuthService() error {
 			services:  authServer.Services,
 			setup:     cache.ForAuth,
 			cacheName: []string{teleport.ComponentAuth},
-			inMemory:  true,
 			events:    true,
 		})
 		if err != nil {
@@ -1350,6 +1363,7 @@ func (process *TeleportProcess) initAuthService() error {
 		return trace.Wrap(err)
 	}
 	go mux.Serve()
+	authMetrics := &auth.Metrics{GRPCServerLatency: cfg.Metrics.GRPCServerLatency}
 	tlsServer, err := auth.NewTLSServer(auth.TLSServerConfig{
 		TLS:           tlsConfig,
 		APIConfig:     *apiConf,
@@ -1358,6 +1372,7 @@ func (process *TeleportProcess) initAuthService() error {
 		Component:     teleport.Component(teleport.ComponentAuth, process.id),
 		ID:            process.id,
 		Listener:      mux.TLS(),
+		Metrics:       authMetrics,
 	})
 	if err != nil {
 		return trace.Wrap(err)
@@ -1527,13 +1542,8 @@ type accessCacheConfig struct {
 	setup cache.SetupConfigFn
 	// cacheName is a cache name
 	cacheName []string
-	// inMemory is true if cache
-	// should use memory
-	inMemory bool
 	// events is true if cache should turn on events
 	events bool
-	// pollPeriod contains period for polling
-	pollPeriod time.Duration
 }
 
 func (c *accessCacheConfig) CheckAndSetDefaults() error {
@@ -1546,9 +1556,6 @@ func (c *accessCacheConfig) CheckAndSetDefaults() error {
 	if len(c.cacheName) == 0 {
 		return trace.BadParameter("missing parameter cacheName")
 	}
-	if c.pollPeriod == 0 {
-		c.pollPeriod = defaults.CachePollPeriod
-	}
 	return nil
 }
 
@@ -1557,40 +1564,18 @@ func (process *TeleportProcess) newAccessCache(cfg accessCacheConfig) (*cache.Ca
 	if err := cfg.CheckAndSetDefaults(); err != nil {
 		return nil, trace.Wrap(err)
 	}
-	var cacheBackend backend.Backend
-	if cfg.inMemory {
-		process.log.Debugf("Creating in-memory backend for %v.", cfg.cacheName)
-		mem, err := memory.New(memory.Config{
-			Context:   process.ExitContext(),
-			EventsOff: !cfg.events,
-			Mirror:    true,
-		})
-		if err != nil {
-			return nil, trace.Wrap(err)
-		}
-		cacheBackend = mem
-	} else {
-		process.log.Debugf("Creating sqlite backend for %v.", cfg.cacheName)
-		path := filepath.Join(append([]string{process.Config.DataDir, "cache"}, cfg.cacheName...)...)
-		if err := os.MkdirAll(path, teleport.SharedDirMode); err != nil {
-			return nil, trace.ConvertSystemError(err)
-		}
-		liteBackend, err := lite.NewWithConfig(process.ExitContext(),
-			lite.Config{
-				Path:             path,
-				EventsOff:        !cfg.events,
-				Memory:           false,
-				Mirror:           true,
-				PollStreamPeriod: 100 * time.Millisecond,
-			})
-		if err != nil {
-			return nil, trace.Wrap(err)
-		}
-		cacheBackend = liteBackend
+	process.log.Debugf("Creating in-memory backend for %v.", cfg.cacheName)
+	mem, err := memory.New(memory.Config{
+		Context:   process.ExitContext(),
+		EventsOff: !cfg.events,
+		Mirror:    true,
+	})
+	if err != nil {
+		return nil, trace.Wrap(err)
 	}
 	reporter, err := backend.NewReporter(backend.ReporterConfig{
 		Component: teleport.ComponentCache,
-		Backend:   cacheBackend,
+		Backend:   mem,
 	})
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -1745,7 +1730,6 @@ func (process *TeleportProcess) newLocalCacheForWindowsDesktop(clt auth.ClientI,
 // newLocalCache returns new instance of access point
 func (process *TeleportProcess) newLocalCache(clt auth.ClientI, setupConfig cache.SetupConfigFn, cacheName []string) (*cache.Cache, error) {
 	return process.newAccessCache(accessCacheConfig{
-		inMemory:  process.Config.CachePolicy.Type == memory.GetName(),
 		services:  clt,
 		setup:     setupConfig,
 		cacheName: cacheName,
@@ -2100,38 +2084,30 @@ func (process *TeleportProcess) initUploaderService(streamer events.Streamer, au
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	// prepare dirs for uploader
-	streamingDir := []string{process.Config.DataDir, teleport.LogsDir, teleport.ComponentUpload, events.StreamingLogsDir, apidefaults.Namespace}
-	paths := [][]string{
-		// DELETE IN (5.1.0)
-		// this directory will no longer be used after migration to 5.1.0
-		{process.Config.DataDir, teleport.LogsDir, teleport.ComponentUpload, events.SessionLogsDir, apidefaults.Namespace},
-		// This directory will remain to be used after migration to 5.1.0
-		streamingDir,
-	}
-	for _, path := range paths {
-		for i := 1; i < len(path); i++ {
-			dir := filepath.Join(path[:i+1]...)
-			log.Infof("Creating directory %v.", dir)
-			err := os.Mkdir(dir, 0755)
-			err = trace.ConvertSystemError(err)
-			if err != nil {
-				if !trace.IsAlreadyExists(err) {
-					return trace.Wrap(err)
-				}
+
+	// prepare dir for uploader
+	path := []string{process.Config.DataDir, teleport.LogsDir, teleport.ComponentUpload, events.StreamingLogsDir, apidefaults.Namespace}
+	for i := 1; i < len(path); i++ {
+		dir := filepath.Join(path[:i+1]...)
+		log.Infof("Creating directory %v.", dir)
+		err := os.Mkdir(dir, 0755)
+		err = trace.ConvertSystemError(err)
+		if err != nil {
+			if !trace.IsAlreadyExists(err) {
+				return trace.Wrap(err)
 			}
-			if uid != nil && gid != nil {
-				log.Infof("Setting directory %v owner to %v:%v.", dir, *uid, *gid)
-				err := os.Chown(dir, *uid, *gid)
-				if err != nil {
-					return trace.ConvertSystemError(err)
-				}
+		}
+		if uid != nil && gid != nil {
+			log.Infof("Setting directory %v owner to %v:%v.", dir, *uid, *gid)
+			err := os.Chown(dir, *uid, *gid)
+			if err != nil {
+				return trace.ConvertSystemError(err)
 			}
 		}
 	}
 
 	fileUploader, err := filesessions.NewUploader(filesessions.UploaderConfig{
-		ScanDir:  filepath.Join(streamingDir...),
+		ScanDir:  filepath.Join(path...),
 		Streamer: streamer,
 		AuditLog: auditLog,
 		EventsC:  process.Config.UploadEventsC,
@@ -2188,7 +2164,7 @@ func (process *TeleportProcess) initMetricsService() error {
 
 		pool := x509.NewCertPool()
 		for _, caCertPath := range process.Config.Metrics.CACerts {
-			caCert, err := ioutil.ReadFile(caCertPath)
+			caCert, err := os.ReadFile(caCertPath)
 			if err != nil {
 				return trace.Wrap(err, "failed to read prometheus CA certificate %+v", caCertPath)
 			}
@@ -2364,6 +2340,11 @@ func (process *TeleportProcess) getAdditionalPrincipals(role types.SystemRole) (
 		principals = append(principals, process.Config.Hostname)
 	}
 	var addrs []utils.NetAddr
+
+	// Add default DNSNames to the dnsNames list.
+	// For identities generated by teleport <= v6.1.6 the teleport.cluster.local DNS is not present
+	dnsNames = append(dnsNames, auth.DefaultDNSNamesForRole(role)...)
+
 	switch role {
 	case types.RoleProxy:
 		addrs = append(process.Config.Proxy.PublicAddrs,
@@ -3387,7 +3368,7 @@ func (process *TeleportProcess) setupProxyTLSConfig(conn *Connector, tsrv revers
 		// order to be able to validate certificates provided by app
 		// access CLI clients.
 		var err error
-		tlsClone.ClientCAs, err = auth.ClientCertPool(accessPoint, clusterName)
+		tlsClone.ClientCAs, err = auth.DefaultClientCertPool(accessPoint, clusterName)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
@@ -3748,6 +3729,9 @@ func (process *TeleportProcess) initAuthStorage() (bk backend.Backend, err error
 	// etcd backend.
 	case etcdbk.GetName():
 		bk, err = etcdbk.New(ctx, bc.Params)
+	// PostgreSQL backend
+	case postgres.GetName():
+		bk, err = postgres.New(ctx, bc.Params)
 	default:
 		err = trace.BadParameter("unsupported secrets storage type: %q", bc.Type)
 	}
@@ -3795,10 +3779,16 @@ func (process *TeleportProcess) StartShutdown(ctx context.Context) context.Conte
 			process.log.Warnf("Error waiting for all services to complete: %v", err)
 		}
 		process.log.Debug("All supervisor functions are completed.")
-		localAuth := process.getLocalAuth()
-		if localAuth != nil {
-			if err := process.localAuth.Close(); err != nil {
+
+		if localAuth := process.getLocalAuth(); localAuth != nil {
+			if err := localAuth.Close(); err != nil {
 				process.log.Warningf("Failed closing auth server: %v.", err)
+			}
+		}
+
+		if process.storage != nil {
+			if err := process.storage.Close(); err != nil {
+				process.log.Warningf("Failed closing process storage: %v.", err)
 			}
 		}
 	}()
@@ -3822,9 +3812,9 @@ func (process *TeleportProcess) Close() error {
 	process.Config.Keygen.Close()
 
 	var errors []error
-	localAuth := process.getLocalAuth()
-	if localAuth != nil {
-		errors = append(errors, process.localAuth.Close())
+
+	if localAuth := process.getLocalAuth(); localAuth != nil {
+		errors = append(errors, localAuth.Close())
 	}
 
 	if process.storage != nil {
@@ -3845,7 +3835,7 @@ func validateConfig(cfg *Config) error {
 	}
 
 	if cfg.Console == nil {
-		cfg.Console = ioutil.Discard
+		cfg.Console = io.Discard
 	}
 
 	if len(cfg.AuthServers) == 0 {
@@ -3899,10 +3889,10 @@ func initSelfSignedHTTPSCert(cfg *Config) (err error) {
 		return trace.Wrap(err)
 	}
 
-	if err := ioutil.WriteFile(keyPath, creds.PrivateKey, 0600); err != nil {
+	if err := os.WriteFile(keyPath, creds.PrivateKey, 0600); err != nil {
 		return trace.Wrap(err, "error writing key PEM")
 	}
-	if err := ioutil.WriteFile(certPath, creds.Cert, 0600); err != nil {
+	if err := os.WriteFile(certPath, creds.Cert, 0600); err != nil {
 		return trace.Wrap(err, "error writing key PEM")
 	}
 	return nil
@@ -4003,7 +3993,8 @@ func getPublicAddr(authClient auth.ReadAppsAccessPoint, a App) (string, error) {
 	for {
 		select {
 		case <-ticker.C:
-			publicAddr, err := findPublicAddr(authClient, a)
+			publicAddr, err := app.FindPublicAddr(authClient, a.PublicAddr, a.Name)
+
 			if err == nil {
 				return publicAddr, nil
 			}
@@ -4011,37 +4002,6 @@ func getPublicAddr(authClient auth.ReadAppsAccessPoint, a App) (string, error) {
 			return "", trace.BadParameter("timed out waiting for proxy with public address")
 		}
 	}
-}
-
-// findPublicAddr tries to resolve the public address of the proxy of this cluster.
-func findPublicAddr(authClient auth.ReadAppsAccessPoint, a App) (string, error) {
-	// If the application has a public address already set, use it.
-	if a.PublicAddr != "" {
-		return a.PublicAddr, nil
-	}
-
-	// Fetch list of proxies, if first has public address set, use it.
-	servers, err := authClient.GetProxies()
-	if err != nil {
-		return "", trace.Wrap(err)
-	}
-	if len(servers) == 0 {
-		return "", trace.BadParameter("cluster has no proxied registered, at least one proxy must be registered for application access")
-	}
-	if servers[0].GetPublicAddr() != "" {
-		addr, err := utils.ParseAddr(servers[0].GetPublicAddr())
-		if err != nil {
-			return "", trace.Wrap(err)
-		}
-		return fmt.Sprintf("%v.%v", a.Name, addr.Host()), nil
-	}
-
-	// Fall back to cluster name.
-	cn, err := authClient.GetClusterName()
-	if err != nil {
-		return "", trace.Wrap(err)
-	}
-	return fmt.Sprintf("%v.%v", a.Name, cn.GetClusterName()), nil
 }
 
 // newHTTPFileSystem creates a new HTTP file system for the web handler.

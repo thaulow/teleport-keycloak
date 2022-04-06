@@ -119,7 +119,7 @@ func (c *agentConfig) checkAndSetDefaults() error {
 
 // Agent creates and manages a reverse tunnel to a remote proxy server.
 type Agent struct {
-	*agentConfig
+	agentConfig
 	// client is a client for the agent's ssh connection.
 	client SSHClient
 	// state is the internal state of an agent. Use GetState for threadsafe access.
@@ -143,8 +143,8 @@ type Agent struct {
 	transportWG sync.WaitGroup
 }
 
-// NewAgent intializes a reverse tunnel agent.
-func NewAgent(config *agentConfig) (*Agent, error) {
+// newAgent intializes a reverse tunnel agent.
+func newAgent(config agentConfig) (*Agent, error) {
 	err := config.checkAndSetDefaults()
 	if err != nil {
 		return nil, trace.Wrap(err)

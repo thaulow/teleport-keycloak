@@ -20,7 +20,7 @@ It is worth noting that GCP Artifact Registry is in preview and has not had an u
 
 As discussed below, JFrog Artifactory and PackageCloud are non-starters due to their signing key requirements.
 
-As a consequence of the the issues with the third party solutions, along with the additional channel support features available, I recommend fixing our current S3-hosted solution. This would require switching reprepo for aptly in our Drone pipelines, and updating the current createrepo steps.
+As a consequence of the the issues with the third party solutions, along with the additional channel support features available, I recommend fixing our current S3-hosted solution. This would require switching reprepro for aptly in our Drone pipelines, and updating the current createrepo steps.
 
 #### Implementation details and proof of concept
 The follwing channel scheme is proposed for APT and YUM with the S3-hosted option:

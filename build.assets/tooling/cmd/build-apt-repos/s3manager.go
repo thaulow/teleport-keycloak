@@ -35,7 +35,7 @@ func NewS3Manager(bucketName string) *s3manager {
 func (s *s3manager) DownloadExistingRepo(localPath string) error {
 	err := ensureDirectoryExists(localPath)
 	if err != nil {
-		return trace.Wrap(err, "failed to ensure path %q exists", localPath)
+		return trace.Wrap(err, "failed to ensure path \"%s\" exists", localPath)
 	}
 
 	err = s.sync(localPath, true)
@@ -66,10 +66,10 @@ func (s *s3manager) sync(localPath string, download bool) error {
 		dest = s.bucketPath
 	}
 
-	logrus.Infof("Performing S3 sync from %q to %q...", src, dest)
+	logrus.Infof("Performing S3 sync from \"%s\" to \"%s\"...", src, dest)
 	err := s.syncManager.Sync(src, dest)
 	if err != nil {
-		return trace.Wrap(err, "failed to sync %q to %q", src, dest)
+		return trace.Wrap(err, "failed to sync \"%s\" to \"%s\"", src, dest)
 	}
 	logrus.Infoln("S3 sync complete")
 
@@ -79,7 +79,7 @@ func (s *s3manager) sync(localPath string, download bool) error {
 func ensureDirectoryExists(path string) error {
 	err := os.MkdirAll(path, 0660)
 	if err != nil {
-		return trace.Wrap(err, "failed to create directory %q", path)
+		return trace.Wrap(err, "failed to create directory \"%s\"", path)
 	}
 
 	return nil

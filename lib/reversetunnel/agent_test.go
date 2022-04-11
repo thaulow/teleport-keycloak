@@ -127,7 +127,7 @@ func (m *mockSSHChannel) Stderr() io.ReadWriter {
 	return nil
 }
 
-// mockAgentInjection impements several interaces for injecting into an agent.
+// mockAgentInjection implements several interfaces for injecting into an agent.
 type mockAgentInjection struct {
 	client SSHClient
 }

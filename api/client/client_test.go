@@ -684,7 +684,7 @@ func TestClient_NotAllErrorsTripBreaker(t *testing.T) {
 		// advance clock to enter recovering - next request will be blocked
 		clock.Advance(time.Hour)
 
-		_, _, err = clt.ListResources(ctx, proto.ListResourcesRequest{
+		_, err = clt.ListResources(ctx, proto.ListResourcesRequest{
 			ResourceType: types.KindDatabaseServer,
 			Namespace:    defaults.Namespace,
 			Limit:        1,
@@ -695,7 +695,7 @@ func TestClient_NotAllErrorsTripBreaker(t *testing.T) {
 		// advance clock to allow request
 		clock.Advance(time.Hour)
 
-		_, _, err = clt.ListResources(ctx, proto.ListResourcesRequest{
+		_, err = clt.ListResources(ctx, proto.ListResourcesRequest{
 			ResourceType: types.KindDatabaseServer,
 			Namespace:    defaults.Namespace,
 			Limit:        1,
@@ -709,7 +709,7 @@ func TestClient_NotAllErrorsTripBreaker(t *testing.T) {
 		}
 	}
 
-	_, _, err = clt.ListResources(context.Background(), proto.ListResourcesRequest{
+	_, err = clt.ListResources(context.Background(), proto.ListResourcesRequest{
 		ResourceType: types.KindDatabaseServer,
 		Namespace:    defaults.Namespace,
 		Limit:        1,
@@ -719,7 +719,7 @@ func TestClient_NotAllErrorsTripBreaker(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, _, err = clt.ListResources(ctx, proto.ListResourcesRequest{
+	_, err = clt.ListResources(ctx, proto.ListResourcesRequest{
 		ResourceType: types.KindDatabaseServer,
 		Namespace:    defaults.Namespace,
 		Limit:        1,

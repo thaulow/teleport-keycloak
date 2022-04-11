@@ -54,6 +54,9 @@ func promoteAptPipeline() pipeline {
 				},
 			},
 			Commands: []string{
+				"mkdir -m0700 $GNUPGHOME",
+				"echo \"$GPG_RPM_SIGNING_ARCHIVE\" | base64 -d | tar -xzf - -C $GNUPGHOME",
+				"chown -R root:root $GNUPGHOME", // This probably won't work (gpg1 needs to be able to read it), but it's worth trying
 				"cd /go/src/github.com/gravitational/teleport/build.assets/tooling",
 				"export VERSION=\"v`cat /go/build/CURRENT_VERSION_TAG_GENERIC.txt`\"",
 				"export RELEASE_CHANNEL=\"stable\"", // The tool supports several release channels but I'm not sure where this should be configured

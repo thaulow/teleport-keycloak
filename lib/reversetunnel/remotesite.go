@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/gravitational/teleport"
+	"github.com/gravitational/teleport/api/breaker"
 	"github.com/gravitational/teleport/api/client"
 	"github.com/gravitational/teleport/api/constants"
 	"github.com/gravitational/teleport/api/types"
@@ -114,6 +115,9 @@ func (s *remoteSite) getRemoteClient() (auth.ClientI, bool, error) {
 			Dialer: client.ContextDialerFunc(s.authServerContextDialer),
 			Credentials: []client.Credentials{
 				client.LoadTLS(tlsConfig),
+			},
+			BreakerConfig: breaker.Config{
+				Clock: s.srv.Clock,
 			},
 		})
 		if err != nil {

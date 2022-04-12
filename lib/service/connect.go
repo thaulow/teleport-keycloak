@@ -918,6 +918,7 @@ func (process *TeleportProcess) newClientThroughTunnel(authServers []utils.NetAd
 		Credentials: []apiclient.Credentials{
 			apiclient.LoadTLS(tlsConfig),
 		},
+		BreakerConfig: process.Config.BreakerConfig,
 	})
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -959,7 +960,8 @@ func (process *TeleportProcess) newClientDirect(authServers []utils.NetAddr, tls
 		Credentials: []apiclient.Credentials{
 			apiclient.LoadTLS(tlsConfig),
 		},
-		DialOpts: dialOpts,
+		BreakerConfig: process.Config.BreakerConfig,
+		DialOpts:      dialOpts,
 	}, cltParams...)
 	if err != nil {
 		return nil, trace.Wrap(err)

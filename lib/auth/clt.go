@@ -247,23 +247,6 @@ type ClientConfig struct {
 	TLS *tls.Config
 }
 
-// NewTLSClient returns a new TLS client that uses mutual TLS authentication
-// and dials the remote server using dialer.
-// DELETE IN: 7.0.0.
-func NewTLSClient(cfg ClientConfig, params ...roundtrip.ClientParam) (*Client, error) {
-	c := client.Config{
-		Addrs:           utils.NetAddrsToStrings(cfg.Addrs),
-		Dialer:          cfg.Dialer,
-		DialTimeout:     cfg.DialTimeout,
-		KeepAlivePeriod: cfg.KeepAlivePeriod,
-		KeepAliveCount:  cfg.KeepAliveCount,
-		Credentials: []client.Credentials{
-			client.LoadTLS(cfg.TLS),
-		},
-	}
-	return NewClient(c, params...)
-}
-
 // ClientTimeout sets idle and dial timeouts of the HTTP transport
 // used by the client.
 func ClientTimeout(timeout time.Duration) roundtrip.ClientParam {

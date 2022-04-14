@@ -32,6 +32,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gravitational/teleport/api/breaker"
 	"golang.org/x/crypto/ssh"
 
 	"github.com/stretchr/testify/require"
@@ -2563,6 +2564,7 @@ func (s *TLSSuite) TestCipherSuites(c *check.C) {
 		Credentials: []client.Credentials{
 			client.LoadTLS(tlsConfig),
 		},
+		CircuitBreakerConfig: breaker.NoopBreakerConfig(),
 	})
 	c.Assert(err, check.IsNil)
 
@@ -2589,6 +2591,7 @@ func (s *TLSSuite) TestTLSFailover(c *check.C) {
 		Credentials: []client.Credentials{
 			client.LoadTLS(tlsConfig),
 		},
+		CircuitBreakerConfig: breaker.NoopBreakerConfig(),
 	})
 	c.Assert(err, check.IsNil)
 

@@ -411,12 +411,7 @@ func (i *TeleInstance) Create(t *testing.T, trustedSecrets []*InstanceSecrets, e
 	tconf.Log = i.log
 	tconf.Proxy.DisableWebService = true
 	tconf.Proxy.DisableWebInterface = true
-	tconf.BreakerConfig = breaker.Config{
-		Interval:      200 * time.Millisecond,
-		TrippedPeriod: 100 * time.Millisecond,
-		Clock:         tconf.Clock,
-		Trip:          breaker.StaticTripper(false),
-	}
+	tconf.CircuitBreakerConfig = breaker.NoopBreakerConfig()
 	return i.CreateEx(t, trustedSecrets, tconf)
 }
 
@@ -656,12 +651,7 @@ func (i *TeleInstance) GenerateConfig(t *testing.T, trustedSecrets []*InstanceSe
 
 	tconf.Keygen = testauthority.New()
 	tconf.MaxRetryPeriod = defaults.HighResPollingPeriod
-	tconf.BreakerConfig = breaker.Config{
-		Interval:      200 * time.Millisecond,
-		TrippedPeriod: 100 * time.Millisecond,
-		Clock:         tconf.Clock,
-		Trip:          breaker.StaticTripper(false),
-	}
+	tconf.CircuitBreakerConfig = breaker.NoopBreakerConfig()
 
 	i.Config = tconf
 	return tconf, nil
@@ -1023,6 +1013,7 @@ func (i *TeleInstance) StartNodeAndProxy(name string, sshPort, proxyWebPort, pro
 			Addr:        Host,
 		},
 	}
+	tconf.CircuitBreakerConfig = breaker.NoopBreakerConfig()
 
 	// Create a new Teleport process and add it to the list of nodes that
 	// compose this "cluster".
@@ -1110,6 +1101,7 @@ func (i *TeleInstance) StartProxy(cfg ProxyConfig) (reversetunnel.Server, error)
 	tconf.Proxy.DisableWebService = cfg.DisableWebService
 	tconf.Proxy.DisableWebInterface = cfg.DisableWebInterface
 	tconf.Proxy.DisableALPNSNIListener = cfg.DisableALPNSNIListener
+	tconf.CircuitBreakerConfig = breaker.NoopBreakerConfig()
 
 	// Create a new Teleport process and add it to the list of nodes that
 	// compose this "cluster".

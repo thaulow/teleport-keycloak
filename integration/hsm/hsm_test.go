@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/gravitational/teleport/api/breaker"
 	"github.com/gravitational/trace"
 	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/require"
@@ -267,6 +268,7 @@ func newHSMAuthConfig(ctx context.Context, t *testing.T, storageConfig backend.C
 	}()
 	config.Auth.KeyStore = keystore.SetupSoftHSMTest(t)
 	config.Log = log
+	config.CircuitBreakerConfig = breaker.NoopBreakerConfig()
 	return config
 }
 
@@ -295,6 +297,7 @@ func newProxyConfig(ctx context.Context, t *testing.T, authAddr utils.NetAddr, l
 	config.AuthServers = append(config.AuthServers, authAddr)
 	fakeClock := clockwork.NewFakeClock()
 	config.Clock = fakeClock
+	config.CircuitBreakerConfig = breaker.NoopBreakerConfig()
 	go func() {
 		for {
 			select {
@@ -489,6 +492,7 @@ func TestHSMDualAuthRotation(t *testing.T) {
 			Credentials: []client.Credentials{
 				client.LoadTLS(tlsConfig),
 			},
+			CircuitBreakerConfig: breaker.NoopBreakerConfig(),
 		})
 		require.NoError(t, err)
 		return clt
@@ -567,6 +571,7 @@ func TestHSMDualAuthRotation(t *testing.T) {
 			Credentials: []client.Credentials{
 				client.LoadTLS(tlsConfig),
 			},
+			CircuitBreakerConfig: breaker.NoopBreakerConfig(),
 		})
 		require.NoError(t, err)
 		return clt
@@ -794,6 +799,7 @@ func TestHSMMigrate(t *testing.T) {
 			Credentials: []client.Credentials{
 				client.LoadTLS(tlsConfig),
 			},
+			CircuitBreakerConfig: breaker.NoopBreakerConfig(),
 		})
 		require.NoError(t, err)
 		return clt

@@ -34,7 +34,6 @@ import (
 	"github.com/gravitational/teleport"
 	apiclient "github.com/gravitational/teleport/api/client"
 	"github.com/gravitational/teleport/api/client/proto"
-	"github.com/gravitational/teleport/api/metadata"
 	"github.com/gravitational/teleport/api/types"
 	"github.com/gravitational/teleport/lib"
 	"github.com/gravitational/teleport/lib/auth"
@@ -414,6 +413,7 @@ func (process *TeleportProcess) firstTimeConnect(role types.SystemRole) (*Connec
 			GetHostCredentials:   client.HostCredentials,
 			Clock:                process.Clock,
 			JoinMethod:           process.Config.JoinMethod,
+			CircuitBreakerConfig: process.Config.CircuitBreakerConfig,
 		})
 		if err != nil {
 			return nil, trace.Wrap(err)
@@ -918,7 +918,7 @@ func (process *TeleportProcess) newClientThroughTunnel(authServers []utils.NetAd
 		Credentials: []apiclient.Credentials{
 			apiclient.LoadTLS(tlsConfig),
 		},
-		BreakerConfig: process.Config.BreakerConfig,
+		CircuitBreakerConfig: process.Config.CircuitBreakerConfig,
 	})
 	if err != nil {
 		return nil, trace.Wrap(err)
@@ -950,8 +950,8 @@ func (process *TeleportProcess) newClientDirect(authServers []utils.NetAddr, tls
 			return nil, trace.Wrap(err)
 		}
 		dialOpts = append(dialOpts, []grpc.DialOption{
-			grpc.WithChainUnaryInterceptor(metadata.UnaryClientInterceptor, om.UnaryClientInterceptor(grpcMetrics)),
-			grpc.WithChainStreamInterceptor(metadata.StreamClientInterceptor, om.StreamClientInterceptor(grpcMetrics)),
+			grpc.WithUnaryInterceptor(om.UnaryClientInterceptor(grpcMetrics)),
+			grpc.WithStreamInterceptor(om.StreamClientInterceptor(grpcMetrics)),
 		}...)
 	}
 
@@ -960,8 +960,8 @@ func (process *TeleportProcess) newClientDirect(authServers []utils.NetAddr, tls
 		Credentials: []apiclient.Credentials{
 			apiclient.LoadTLS(tlsConfig),
 		},
-		BreakerConfig: process.Config.BreakerConfig,
-		DialOpts:      dialOpts,
+		CircuitBreakerConfig: process.Config.CircuitBreakerConfig,
+		DialOpts:             dialOpts,
 	}, cltParams...)
 	if err != nil {
 		return nil, trace.Wrap(err)

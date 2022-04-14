@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gravitational/teleport/api/breaker"
 	apidefaults "github.com/gravitational/teleport/api/defaults"
 	"github.com/gravitational/teleport/api/types"
 	"github.com/gravitational/teleport/lib"
@@ -61,6 +62,7 @@ func newNodeConfig(t *testing.T, authAddr utils.NetAddr, tokenName string, joinM
 	config.DataDir = t.TempDir()
 	config.AuthServers = append(config.AuthServers, authAddr)
 	config.Log = newSilentLogger()
+	config.CircuitBreakerConfig = breaker.NoopBreakerConfig()
 	return config
 }
 
@@ -81,6 +83,7 @@ func newProxyConfig(t *testing.T, authAddr utils.NetAddr, tokenName string, join
 	config.DataDir = t.TempDir()
 	config.AuthServers = append(config.AuthServers, authAddr)
 	config.Log = newSilentLogger()
+	config.CircuitBreakerConfig = breaker.NoopBreakerConfig()
 	return config
 }
 
@@ -112,6 +115,7 @@ func newAuthConfig(t *testing.T, clock clockwork.Clock) *service.Config {
 	config.SSH.Enabled = false
 	config.Clock = clock
 	config.Log = newSilentLogger()
+	config.CircuitBreakerConfig = breaker.NoopBreakerConfig()
 	return config
 }
 

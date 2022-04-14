@@ -26,11 +26,9 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/gravitational/teleport/api/breaker"
 	"github.com/gravitational/teleport/api/client/proto"
 	"github.com/gravitational/teleport/api/defaults"
 	"github.com/gravitational/teleport/api/types"
-	"github.com/jonboulle/clockwork"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
@@ -69,12 +67,6 @@ func (m *mockServer) Addr() string {
 
 type ConfigOpt func(*Config)
 
-func WithBreakerConfig(breakCfg breaker.Config) ConfigOpt {
-	return func(config *Config) {
-		config.BreakerConfig = breakCfg
-	}
-}
-
 func WithConfig(cfg Config) ConfigOpt {
 	return func(config *Config) {
 		*config = cfg
@@ -89,11 +81,6 @@ func (m *mockServer) NewClient(ctx context.Context, opts ...ConfigOpt) (*Client,
 		},
 		DialOpts: []grpc.DialOption{
 			grpc.WithTransportCredentials(insecure.NewCredentials()), // TODO(Joerger) remove insecure dial option
-		},
-		BreakerConfig: breaker.Config{
-			Interval:      time.Second,
-			RecoveryLimit: 1,
-			Trip:          breaker.StaticTripper(false),
 		},
 	}
 
@@ -437,10 +424,6 @@ func TestNewDialBackground(t *testing.T) {
 		DialOpts: []grpc.DialOption{
 			grpc.WithTransportCredentials(insecure.NewCredentials()), // TODO(Joerger) remove insecure dial option
 		},
-		BreakerConfig: breaker.Config{
-			Interval: time.Second,
-			Trip:     breaker.StaticTripper(false),
-		},
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, clt.Close()) })
@@ -654,103 +637,5 @@ func TestGetResources(t *testing.T) {
 			require.Len(t, resources, len(expectedResources))
 			require.Empty(t, cmp.Diff(expectedResources, resources))
 		})
-	}
-}
-
-func TestClient_NotAllErrorsTripBreaker(t *testing.T) {
-	t.Parallel()
-	srv := startMockServer(t)
-	clock := clockwork.NewFakeClock()
-
-	tripped := make(chan struct{}, 1)
-	standby := make(chan struct{}, 1)
-
-	clt, err := srv.NewClient(context.Background(), WithBreakerConfig(breaker.Config{
-		Clock:         clock,
-		Interval:      time.Second,
-		RecoveryLimit: 1,
-		Trip:          breaker.ConsecutiveFailureTripper(0),
-		OnTripped: func() {
-			tripped <- struct{}{}
-		},
-		OnStandBy: func() {
-			standby <- struct{}{}
-		},
-	}))
-	require.NoError(t, err)
-
-	returnBreakerToStandBy := func() {
-		ctx := context.Background()
-		// advance clock to enter recovering - next request will be blocked
-		clock.Advance(time.Hour)
-
-		_, err = clt.ListResources(ctx, proto.ListResourcesRequest{
-			ResourceType: types.KindDatabaseServer,
-			Namespace:    defaults.Namespace,
-			Limit:        1,
-		})
-		require.Error(t, err)
-		require.ErrorIs(t, err, breaker.ErrRecoveryLimitExceeded)
-
-		// advance clock to allow request
-		clock.Advance(time.Hour)
-
-		_, err = clt.ListResources(ctx, proto.ListResourcesRequest{
-			ResourceType: types.KindDatabaseServer,
-			Namespace:    defaults.Namespace,
-			Limit:        1,
-		})
-		require.NoError(t, err)
-
-		select {
-		case <-standby:
-		case <-time.After(time.Minute):
-			t.Fatal("timeout waiting to return to standby")
-		}
-	}
-
-	_, err = clt.ListResources(context.Background(), proto.ListResourcesRequest{
-		ResourceType: types.KindDatabaseServer,
-		Namespace:    defaults.Namespace,
-		Limit:        1,
-	})
-	require.NoError(t, err)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	_, err = clt.ListResources(ctx, proto.ListResourcesRequest{
-		ResourceType: types.KindDatabaseServer,
-		Namespace:    defaults.Namespace,
-		Limit:        1,
-	})
-	require.Error(t, err)
-
-	select {
-	case <-tripped:
-	case <-time.After(time.Minute):
-		t.Fatal("timeout waiting to be tripped")
-	}
-
-	returnBreakerToStandBy()
-
-	_, err = clt.AddMFADeviceSync(context.Background(), &proto.AddMFADeviceSyncRequest{})
-	require.Error(t, err)
-
-	select {
-	case <-tripped:
-		t.Fatal("expected breaker to remain in standby")
-	default:
-	}
-
-	srv.Stop()
-
-	_, err = clt.CreateAppSession(context.Background(), types.CreateAppSessionRequest{})
-	require.Error(t, err)
-
-	select {
-	case <-tripped:
-	case <-time.After(time.Minute):
-		t.Fatal("timeout waiting to be tripped")
 	}
 }

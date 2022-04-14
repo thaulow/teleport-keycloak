@@ -121,10 +121,6 @@ type HTTPClient struct {
 
 // NewHTTPClient creates a new HTTP client with TLS authentication and the given dialer.
 func NewHTTPClient(cfg client.Config, tls *tls.Config, params ...roundtrip.ClientParam) (*HTTPClient, error) {
-	if cfg.BreakerConfig.IsSuccessful == nil {
-		cfg.BreakerConfig.IsSuccessful = client.IsHTTPResponseSuccessful
-	}
-
 	if err := cfg.CheckAndSetDefaults(); err != nil {
 		return nil, err
 	}
@@ -187,14 +183,19 @@ func NewHTTPClient(cfg client.Config, tls *tls.Config, params ...roundtrip.Clien
 		IdleConnTimeout: defaults.HTTPIdleTimeout,
 	}
 
-	cb, err := breaker.New(cfg.BreakerConfig)
-	if err != nil {
-		return nil, trace.Wrap(err)
+	var rt http.RoundTripper = transport
+	if !cfg.CircuitBreakerConfig.Disabled {
+		cb, err := breaker.New(cfg.CircuitBreakerConfig)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+
+		rt = breaker.NewRoundTripper(cb, transport)
 	}
 
 	clientParams := append(
 		[]roundtrip.ClientParam{
-			roundtrip.HTTPClient(&http.Client{Transport: breaker.NewRoundTripper(cb, transport)}),
+			roundtrip.HTTPClient(&http.Client{Transport: rt}),
 			roundtrip.SanitizerEnabled(true),
 		},
 		params...,

@@ -105,7 +105,7 @@ func (a *Server) createOIDCClient(conn types.OIDCConnector) (*oidc.Client, error
 
 func oidcConfig(conn types.OIDCConnector) oidc.ClientConfig {
 	return oidc.ClientConfig{
-		RedirectURL: conn.GetRedirectURL(),
+		RedirectURL: conn.GetRedirectURLs()[0],
 		Credentials: oidc.ClientCredentials{
 			ID:     conn.GetClientID(),
 			Secret: conn.GetClientSecret(),

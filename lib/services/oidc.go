@@ -35,10 +35,12 @@ func ValidateOIDCConnector(oc types.OIDCConnector) error {
 	if _, err := url.Parse(oc.GetIssuerURL()); err != nil {
 		return trace.BadParameter("IssuerURL: bad url: '%v'", oc.GetIssuerURL())
 	}
-	if _, err := url.Parse(oc.GetRedirectURL()); err != nil {
-		return trace.BadParameter("RedirectURL: bad url: '%v'", oc.GetRedirectURL())
-	}
+	for _, redirectURL := range oc.GetRedirectURLs() {
+		if _, err := url.Parse(redirectURL); err != nil {
+			return trace.BadParameter("RedirectURL: bad url: '%v'", redirectURL)
+		}
 
+	}
 	if oc.GetGoogleServiceAccountURI() != "" && oc.GetGoogleServiceAccount() != "" {
 		return trace.BadParameter("one of either google_service_account_uri or google_service_account is supported, not both")
 	}

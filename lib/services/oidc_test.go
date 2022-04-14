@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package services
+package services_test
 
 import (
 	"testing"
@@ -23,6 +23,7 @@ import (
 
 	"github.com/gravitational/teleport"
 	"github.com/gravitational/teleport/api/types"
+	"github.com/gravitational/teleport/lib/services"
 
 	"github.com/stretchr/testify/require"
 )
@@ -47,10 +48,10 @@ func TestOIDCRoleMappingEmpty(t *testing.T) {
 	claims.Add("nickname", "foo")
 	claims.Add("full_name", "foo bar")
 
-	traits := OIDCClaimsToTraits(claims)
+	traits := services.OIDCClaimsToTraits(claims)
 	require.Len(t, traits, 4)
 
-	_, roles := TraitsToRoles(oidcConnector.GetTraitMappings(), traits)
+	_, roles := services.TraitsToRoles(oidcConnector.GetTraitMappings(), traits)
 	require.Len(t, roles, 0)
 }
 
@@ -81,10 +82,10 @@ func TestOIDCRoleMapping(t *testing.T) {
 	claims.Add("nickname", "foo")
 	claims.Add("full_name", "foo bar")
 
-	traits := OIDCClaimsToTraits(claims)
+	traits := services.OIDCClaimsToTraits(claims)
 	require.Len(t, traits, 4)
 
-	_, roles := TraitsToRoles(oidcConnector.GetTraitMappings(), traits)
+	_, roles := services.TraitsToRoles(oidcConnector.GetTraitMappings(), traits)
 	require.Len(t, roles, 1)
 	require.Equal(t, "user", roles[0])
 }
@@ -105,7 +106,7 @@ func TestOIDCUnmarshal(t *testing.T) {
           "redirect_url": "https://localhost:3080/v1/webapi/oidc/callback",
           "display": "whatever",
           "scope": ["roles"],
-          "claims_to_roles": [{
+		  "claims_to_roles": [{
             "claim": "roles",
             "value": "teleport-user",
             "roles": ["dictator"]
@@ -115,13 +116,13 @@ func TestOIDCUnmarshal(t *testing.T) {
       }
 	`
 
-	oc, err := UnmarshalOIDCConnector([]byte(input))
+	oc, err := services.UnmarshalOIDCConnector([]byte(input))
 	require.NoError(t, err)
 
 	require.Equal(t, "google", oc.GetName())
 	require.Equal(t, "https://accounts.google.com", oc.GetIssuerURL())
 	require.Equal(t, "id-from-google.apps.googleusercontent.com", oc.GetClientID())
-	require.Equal(t, "https://localhost:3080/v1/webapi/oidc/callback", oc.GetRedirectURL())
+	require.Equal(t, []string{"https://localhost:3080/v1/webapi/oidc/callback"}, oc.GetRedirectURLs())
 	require.Equal(t, "whatever", oc.GetDisplay())
 	require.Equal(t, "consent login", oc.GetPrompt())
 }
@@ -148,13 +149,13 @@ func TestOIDCUnmarshalOmitPrompt(t *testing.T) {
       }
 	`
 
-	oc, err := UnmarshalOIDCConnector([]byte(input))
+	oc, err := services.UnmarshalOIDCConnector([]byte(input))
 	require.NoError(t, err)
 
 	require.Equal(t, "google", oc.GetName())
 	require.Equal(t, "https://accounts.google.com", oc.GetIssuerURL())
 	require.Equal(t, "id-from-google.apps.googleusercontent.com", oc.GetClientID())
-	require.Equal(t, "https://localhost:3080/v1/webapi/oidc/callback", oc.GetRedirectURL())
+	require.Equal(t, []string{"https://localhost:3080/v1/webapi/oidc/callback"}, oc.GetRedirectURLs())
 	require.Equal(t, "whatever", oc.GetDisplay())
 	require.Equal(t, "", oc.GetPrompt())
 }
@@ -180,19 +181,20 @@ func TestOIDCUnmarshalPromptDefault(t *testing.T) {
       }
 	`
 
-	oc, err := UnmarshalOIDCConnector([]byte(input))
+	oc, err := services.UnmarshalOIDCConnector([]byte(input))
 	require.NoError(t, err)
 
 	require.Equal(t, "google", oc.GetName())
 	require.Equal(t, "https://accounts.google.com", oc.GetIssuerURL())
 	require.Equal(t, "id-from-google.apps.googleusercontent.com", oc.GetClientID())
-	require.Equal(t, "https://localhost:3080/v1/webapi/oidc/callback", oc.GetRedirectURL())
+	require.Equal(t, []string{"https://localhost:3080/v1/webapi/oidc/callback"}, oc.GetRedirectURLs())
 	require.Equal(t, "whatever", oc.GetDisplay())
 	require.Equal(t, teleport.OIDCPromptSelectAccount, oc.GetPrompt())
 }
 
 // TestOIDCUnmarshalInvalid unmarshals and fails validation of the connector
 func TestOIDCUnmarshalInvalid(t *testing.T) {
+	// Test missing roles in claims_to_roles
 	input := `
       {
         "kind": "oidc",
@@ -209,12 +211,12 @@ func TestOIDCUnmarshalInvalid(t *testing.T) {
           "scope": ["roles"],
           "claims_to_roles": [{
             "claim": "roles",
-            "value": "teleport-user",
+            "value": "teleport-user"
           }]
         }
       }
 	`
 
-	_, err := UnmarshalOIDCConnector([]byte(input))
+	_, err := services.UnmarshalOIDCConnector([]byte(input))
 	require.Error(t, err)
 }

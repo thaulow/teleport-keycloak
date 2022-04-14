@@ -37,10 +37,8 @@ type OIDCConnector interface {
 	// ClientSecret is used to authenticate our client and should not
 	// be visible to end user
 	GetClientSecret() string
-	// RedirectURL - Identity provider will use this URL to redirect
-	// client's browser back to it after successful authentication
-	// Should match the URL on Provider's side
-	GetRedirectURL() string
+	// GetRedirectURLs returns list of redirect URLs.
+	GetRedirectURLs() []string
 	// GetACR returns the Authentication Context Class Reference (ACR) value.
 	GetACR() string
 	// GetProvider returns the identity provider.
@@ -62,8 +60,6 @@ type OIDCConnector interface {
 	SetClientID(string)
 	// SetIssuerURL sets the endpoint of the provider
 	SetIssuerURL(string)
-	// SetRedirectURL sets RedirectURL
-	SetRedirectURL(string)
 	// SetPrompt sets OIDC prompt value
 	SetPrompt(string)
 	// GetPrompt returns OIDC prompt value,
@@ -226,11 +222,6 @@ func (o *OIDCConnectorV3) SetIssuerURL(issuerURL string) {
 	o.Spec.IssuerURL = issuerURL
 }
 
-// SetRedirectURL sets client secret to some value
-func (o *OIDCConnectorV3) SetRedirectURL(redirectURL string) {
-	o.Spec.RedirectURL = redirectURL
-}
-
 // SetACR sets the Authentication Context Class Reference (ACR) value.
 func (o *OIDCConnectorV3) SetACR(acrValue string) {
 	o.Spec.ACR = acrValue
@@ -282,6 +273,16 @@ func (o *OIDCConnectorV3) GetClientSecret() string {
 // Should match the URL on Provider's side
 func (o *OIDCConnectorV3) GetRedirectURL() string {
 	return o.Spec.RedirectURL
+}
+
+// GetRedirectURLs returns a list of the connector's redirect URLs.
+func (o *OIDCConnectorV3) GetRedirectURLs() []string {
+	// If RedirectURLs isn't set, default to the deprecated RedirectURL field.
+	// DELETE IN 11.0.0
+	if len(o.Spec.RedirectURLs) == 0 && o.Spec.RedirectURL != "" {
+		return []string{o.Spec.RedirectURL}
+	}
+	return o.Spec.RedirectURLs
 }
 
 // GetACR returns the Authentication Context Class Reference (ACR) value.
@@ -354,6 +355,10 @@ func (o *OIDCConnectorV3) CheckAndSetDefaults() error {
 
 	if err := o.Metadata.CheckAndSetDefaults(); err != nil {
 		return trace.Wrap(err)
+	}
+
+	if len(o.GetRedirectURLs()) == 0 {
+		return trace.BadParameter("RedirectURL: missing redirect_urls, at least one must be provided")
 	}
 
 	if o.Metadata.Name == constants.Local {

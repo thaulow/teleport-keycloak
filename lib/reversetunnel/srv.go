@@ -1062,12 +1062,17 @@ func newRemoteSite(srv *server, domainName string, sconn ssh.Conn) (*remoteSite,
 	}
 	remoteSite.remoteClient = clt
 
+	remoteClusterVersion, err := sendVersionRequest(closeContext, sconn)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+
 	// Check if the cluster that is connecting is a pre-v8 cluster. If it is,
 	// don't assume the newer organization of cluster configuration resources
 	// (RFD 28) because older proxy servers will reject that causing the cache
 	// to go into a re-sync loop.
 	var accessPointFunc auth.NewRemoteProxyCachingAccessPoint
-	ok, err := isPreV8Cluster(closeContext, sconn)
+	ok, err := isPreV8Cluster(remoteClusterVersion)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -1107,7 +1112,7 @@ func newRemoteSite(srv *server, domainName string, sconn ssh.Conn) (*remoteSite,
 		return nil, err
 	}
 
-	go remoteSite.updateCertAuthorities(caRetry)
+	go remoteSite.updateCertAuthorities(caRetry, remoteClusterVersion)
 
 	lockRetry, err := utils.NewLinear(utils.LinearConfig{
 		First:  utils.HalfJitter(srv.Config.PollingPeriod),
@@ -1126,13 +1131,8 @@ func newRemoteSite(srv *server, domainName string, sconn ssh.Conn) (*remoteSite,
 }
 
 // isPreV8Cluster checks if the cluster is older than 8.0.0.
-func isPreV8Cluster(ctx context.Context, conn ssh.Conn) (bool, error) {
-	version, err := sendVersionRequest(ctx, conn)
-	if err != nil {
-		return false, trace.Wrap(err)
-	}
-
-	remoteClusterVersion, err := semver.NewVersion(version)
+func isPreV8Cluster(clusterVersion string) (bool, error) {
+	remoteClusterVersion, err := semver.NewVersion(clusterVersion)
 	if err != nil {
 		return false, trace.Wrap(err)
 	}

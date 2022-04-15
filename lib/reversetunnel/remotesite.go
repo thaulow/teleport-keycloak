@@ -419,7 +419,7 @@ func (s *remoteSite) compareAndSwapCertAuthority(ca types.CertAuthority) error {
 	return trace.CompareFailed("remote certificate authority rotation has been updated")
 }
 
-func (s *remoteSite) updateCertAuthorities(retry utils.Retry) {
+func (s *remoteSite) updateCertAuthorities(retry utils.Retry, remoteClusterVersion string) {
 	s.Debugf("Watching for cert authority changes.")
 
 	for {
@@ -432,7 +432,7 @@ func (s *remoteSite) updateCertAuthorities(retry utils.Retry) {
 			return
 		}
 
-		err := s.watchCertAuthorities()
+		err := s.watchCertAuthorities(remoteClusterVersion)
 		if err != nil {
 			switch {
 			case trace.IsNotFound(err):
@@ -451,7 +451,21 @@ func (s *remoteSite) updateCertAuthorities(retry utils.Retry) {
 	}
 }
 
-func (s *remoteSite) watchCertAuthorities() error {
+func (s *remoteSite) watchCertAuthorities(remoteClusterVersion string) error {
+	localWatchedTypes := []types.CertAuthType{types.HostCA, types.UserCA}
+
+	// Delete in 11.0.
+	ver10orAbove, err := utils.MinVerWithoutPreRelease(remoteClusterVersion, "10.0.0")
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	if ver10orAbove {
+		localWatchedTypes = append(localWatchedTypes, types.DatabaseCA)
+	} else {
+		s.Debugf("connected to remote cluster in version %s. Database CA won't be propagated.", remoteClusterVersion)
+	}
+
 	localWatcher, err := services.NewCertAuthorityWatcher(s.ctx, services.CertAuthorityWatcherConfig{
 		ResourceWatcherConfig: services.ResourceWatcherConfig{
 			Component: teleport.ComponentProxy,
@@ -459,7 +473,7 @@ func (s *remoteSite) watchCertAuthorities() error {
 			Clock:     s.clock,
 			Client:    s.localAccessPoint,
 		},
-		WatchCertTypes: []types.CertAuthType{types.HostCA, types.UserCA, types.DatabaseCA},
+		WatchCertTypes: localWatchedTypes,
 	})
 	if err != nil {
 		return trace.Wrap(err)
@@ -494,8 +508,7 @@ func (s *remoteSite) watchCertAuthorities() error {
 		case cas := <-localWatcher.CertAuthorityC:
 			for _, localCA := range cas {
 				if localCA.GetClusterName() != s.srv.ClusterName ||
-					(localCA.GetType() != types.HostCA &&
-						localCA.GetType() != types.UserCA && localCA.GetType() != types.DatabaseCA) {
+					!localWatcher.IsWatched(localCA.GetType()) {
 					continue
 				}
 

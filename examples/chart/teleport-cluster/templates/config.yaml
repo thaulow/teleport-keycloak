@@ -123,4 +123,13 @@ data:
   {{- end }}
     ssh_service:
       enabled: false
+{{ if .Values.operator }}
+  operator.yaml: |
+    apiVersion: config.teleport.dev/v10
+    kind: SidecarConfig
+    teleport:
+      config: /etc/teleport/teleport.yaml
+    scope:
+      namespace: {{ .Release.Namespace }}
+{{ end }}
 {{- end -}}

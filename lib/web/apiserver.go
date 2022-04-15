@@ -1036,6 +1036,12 @@ func (h *Handler) oidcLoginWeb(w http.ResponseWriter, r *http.Request, p httprou
 		return client.LoginFailedRedirectURL
 	}
 
+	// provide a suggested redirect URL in the request
+	var redirectURL string
+	if len(h.cfg.ProxyPublicAddrs) > 0 {
+		redirectURL = h.cfg.ProxyPublicAddrs[0].String()
+	}
+
 	response, err := h.cfg.ProxyClient.CreateOIDCAuthRequest(
 		services.OIDCAuthRequest{
 			CSRFToken:         req.csrfToken,
@@ -1043,6 +1049,7 @@ func (h *Handler) oidcLoginWeb(w http.ResponseWriter, r *http.Request, p httprou
 			CreateWebSession:  true,
 			ClientRedirectURL: req.clientRedirectURL,
 			CheckUser:         true,
+			RedirectURL:       redirectURL,
 		})
 	if err != nil {
 		logger.WithError(err).Error("Error creating auth request.")
@@ -1181,6 +1188,12 @@ func (h *Handler) oidcLoginConsole(w http.ResponseWriter, r *http.Request, p htt
 		return nil, trace.AccessDenied(ssoLoginConsoleErr)
 	}
 
+	// provide a suggested redirect URL in the request
+	var redirectURL string
+	if len(h.cfg.ProxyPublicAddrs) > 0 {
+		redirectURL = h.cfg.ProxyPublicAddrs[0].String()
+	}
+
 	response, err := h.cfg.ProxyClient.CreateOIDCAuthRequest(
 		services.OIDCAuthRequest{
 			ConnectorID:       req.ConnectorID,
@@ -1191,6 +1204,7 @@ func (h *Handler) oidcLoginConsole(w http.ResponseWriter, r *http.Request, p htt
 			Compatibility:     req.Compatibility,
 			RouteToCluster:    req.RouteToCluster,
 			KubernetesCluster: req.KubernetesCluster,
+			RedirectURL:       redirectURL,
 		})
 	if err != nil {
 		logger.WithError(err).Error("Failed to create OIDC auth request.")

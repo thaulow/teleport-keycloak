@@ -174,7 +174,7 @@ func NewServer(cfg *InitConfig, opts ...ServerOption) (*Server, error) {
 		limiter:         limiter,
 		Authority:       cfg.Authority,
 		AuthServiceName: cfg.AuthServiceName,
-		oidcClients:     make(map[string]*oidcClient),
+		oidcClients:     make(map[string]map[string]*oidcClient),
 		samlProviders:   make(map[string]*samlProvider),
 		githubClients:   make(map[string]*githubClient),
 		caSigningAlg:    cfg.CASigningAlg,
@@ -307,8 +307,9 @@ var (
 //   - same for users and their sessions
 //   - checks public keys to see if they're signed by it (can be trusted or not)
 type Server struct {
-	lock          sync.RWMutex
-	oidcClients   map[string]*oidcClient
+	lock sync.RWMutex
+	// oidcClients is a map from authID -> redirectURL -> oidcClient
+	oidcClients   map[string]map[string]*oidcClient
 	samlProviders map[string]*samlProvider
 	githubClients map[string]*githubClient
 	clock         clockwork.Clock
@@ -3662,8 +3663,8 @@ const (
 
 // oidcClient is internal structure that stores OIDC client and its config
 type oidcClient struct {
-	client *oidc.Client
-	config oidc.ClientConfig
+	client    *oidc.Client
+	connector types.OIDCConnector
 }
 
 // samlProvider is internal structure that stores SAML client and its config
@@ -3676,28 +3677,6 @@ type samlProvider struct {
 type githubClient struct {
 	client *oauth2.Client
 	config oauth2.Config
-}
-
-// oidcConfigsEqual returns true if the provided OIDC configs are equal
-func oidcConfigsEqual(a, b oidc.ClientConfig) bool {
-	if a.RedirectURL != b.RedirectURL {
-		return false
-	}
-	if a.Credentials.ID != b.Credentials.ID {
-		return false
-	}
-	if a.Credentials.Secret != b.Credentials.Secret {
-		return false
-	}
-	if len(a.Scope) != len(b.Scope) {
-		return false
-	}
-	for i := range a.Scope {
-		if a.Scope[i] != b.Scope[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // oauth2ConfigsEqual returns true if the provided OAuth2 configs are equal

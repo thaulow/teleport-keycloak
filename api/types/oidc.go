@@ -268,13 +268,6 @@ func (o *OIDCConnectorV3) GetClientSecret() string {
 	return o.Spec.ClientSecret
 }
 
-// GetRedirectURL - Identity provider will use this URL to redirect
-// client's browser back to it after successful authentication
-// Should match the URL on Provider's side
-func (o *OIDCConnectorV3) GetRedirectURL() string {
-	return o.Spec.RedirectURL
-}
-
 // GetRedirectURLs returns a list of the connector's redirect URLs.
 func (o *OIDCConnectorV3) GetRedirectURLs() []string {
 	// If RedirectURLs isn't set, default to the deprecated RedirectURL field.

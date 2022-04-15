@@ -23,14 +23,13 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/gravitational/teleport"
 	"github.com/gravitational/teleport/api/constants"
 	apidefaults "github.com/gravitational/teleport/api/defaults"
 	"github.com/gravitational/teleport/api/types"
 	apievents "github.com/gravitational/teleport/api/types/events"
-	apiutils "github.com/gravitational/teleport/api/utils"
 	"github.com/gravitational/teleport/lib/defaults"
 	"github.com/gravitational/teleport/lib/events"
 	"github.com/gravitational/teleport/lib/services"
@@ -42,77 +41,31 @@ import (
 	"github.com/gravitational/trace"
 )
 
-func (a *Server) getOrCreateOIDCClient(conn types.OIDCConnector) (*oidc.Client, error) {
-	client, err := a.getOIDCClient(conn)
-	if err == nil {
-		return client, nil
-	}
-	if !trace.IsNotFound(err) {
-		return nil, trace.Wrap(err)
-	}
-	return a.createOIDCClient(conn)
-}
-
-func (a *Server) getOIDCClient(conn types.OIDCConnector) (*oidc.Client, error) {
+// getOIDCClient gets a cached or new oidc client for the given
+// OIDC connector and redirectURL preference.
+func (a *Server) getOIDCClient(conn types.OIDCConnector, proxyAddr string) (*oidc.Client, error) {
 	a.lock.Lock()
 	defer a.lock.Unlock()
 
-	clientPack, ok := a.oidcClients[conn.GetName()]
+	cachedClients, ok := a.oidcClients[conn.GetName()]
 	if !ok {
-		return nil, trace.NotFound("connector %v is not found", conn.GetName())
+		cachedClients = map[string]*oidcClient{}
+		a.oidcClients[conn.GetName()] = cachedClients
 	}
 
-	config := oidcConfig(conn)
-	if ok && oidcConfigsEqual(clientPack.config, config) {
-		return clientPack.client, nil
+	cachedClient, ok := cachedClients[proxyAddr]
+	if ok && cmp.Equal(cachedClient.connector, conn) {
+		return cachedClient.client, nil
 	}
+	delete(a.samlProviders, conn.GetName())
 
-	delete(a.oidcClients, conn.GetName())
-	return nil, trace.NotFound("connector %v has updated the configuration and is invalidated", conn.GetName())
-
-}
-
-func (a *Server) createOIDCClient(conn types.OIDCConnector) (*oidc.Client, error) {
-	config := oidcConfig(conn)
-	client, err := oidc.NewClient(config)
+	client, err := services.GetOIDCClient(a.closeCtx, conn, proxyAddr)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
 
-	doneSyncing := make(chan struct{})
-	go func() {
-		defer close(doneSyncing)
-		client.SyncProviderConfig(conn.GetIssuerURL())
-	}()
-
-	select {
-	case <-doneSyncing:
-	case <-time.After(defaults.WebHeadersTimeout):
-		return nil, trace.ConnectionProblem(nil,
-			"timed out syncing oidc connector %v, ensure URL %q is valid and accessible and check configuration",
-			conn.GetName(), conn.GetIssuerURL())
-	case <-a.closeCtx.Done():
-		return nil, trace.ConnectionProblem(nil, "auth server is shutting down")
-	}
-
-	a.lock.Lock()
-	defer a.lock.Unlock()
-
-	a.oidcClients[conn.GetName()] = &oidcClient{client: client, config: config}
-
+	cachedClients[proxyAddr] = &oidcClient{client: client, connector: conn}
 	return client, nil
-}
-
-func oidcConfig(conn types.OIDCConnector) oidc.ClientConfig {
-	return oidc.ClientConfig{
-		RedirectURL: conn.GetRedirectURLs()[0],
-		Credentials: oidc.ClientCredentials{
-			ID:     conn.GetClientID(),
-			Secret: conn.GetClientSecret(),
-		},
-		// open id notifies provider that we are using OIDC scopes
-		Scope: apiutils.Deduplicate(append([]string{"openid", "email"}, conn.GetScope()...)),
-	}
 }
 
 // UpsertOIDCConnector creates or updates an OIDC connector.
@@ -158,11 +111,12 @@ func (a *Server) DeleteOIDCConnector(ctx context.Context, connectorName string) 
 
 func (a *Server) CreateOIDCAuthRequest(req services.OIDCAuthRequest) (*services.OIDCAuthRequest, error) {
 	ctx := context.TODO()
+
 	connector, err := a.Identity.GetOIDCConnector(ctx, req.ConnectorID, true)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	oidcClient, err := a.getOrCreateOIDCClient(connector)
+	oidcClient, err := a.getOIDCClient(connector, req.RedirectURL)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -287,7 +241,7 @@ func (a *Server) validateOIDCAuthCallback(q url.Values) (*oidcAuthResponse, erro
 		return nil, trace.Wrap(err)
 	}
 
-	oidcClient, err := a.getOrCreateOIDCClient(connector)
+	oidcClient, err := a.getOIDCClient(connector, req.RedirectURL)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

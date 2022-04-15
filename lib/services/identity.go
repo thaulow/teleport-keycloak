@@ -381,7 +381,11 @@ type OIDCAuthRequest struct {
 	// CSRFToken is associated with user web session token
 	CSRFToken string `json:"csrf_token"`
 
-	// RedirectURL will be used by browser
+	// RedirectURL will be used to route the user back to a
+	// Teleport Proxy after the oidc login attempt in the
+	// brower. If a redirect URL is provided in the initial
+	// request, then that URL will be prioritized by the Auth
+	// server when choosing a redirect URL to send in response.
 	RedirectURL string `json:"redirect_url"`
 
 	// PublicKey is an optional public key, users want these

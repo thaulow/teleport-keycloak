@@ -68,6 +68,15 @@ type sshDialer interface {
 	DialContext(context.Context, utils.NetAddr) (SSHClient, error)
 }
 
+// SSHClient is a client for an ssh connection.
+type SSHClient interface {
+	ssh.Conn
+	Principals() []string
+	GlobalRequests() <-chan *ssh.Request
+	HandleChannelOpen(channelType string) <-chan ssh.NewChannel
+	Reply(*ssh.Request, bool, []byte) error
+}
+
 // agentConfig represents an agent configuration.
 type agentConfig struct {
 	// addr is the target address to dial.
@@ -156,8 +165,7 @@ type agent struct {
 
 // newAgent intializes a reverse tunnel agent.
 func newAgent(config agentConfig) (*agent, error) {
-	err := config.checkAndSetDefaults()
-	if err != nil {
+	if err := config.checkAndSetDefaults(); err != nil {
 		return nil, trace.Wrap(err)
 	}
 
@@ -455,7 +463,7 @@ func (a *agent) signalDraining() <-chan struct{} {
 	a.wg.Add(1)
 	go func() {
 		<-a.drainCtx.Done()
-		c <- struct{}{}
+		close(c)
 		a.wg.Done()
 	}()
 

@@ -116,7 +116,7 @@ func (a *Server) CreateOIDCAuthRequest(req services.OIDCAuthRequest) (*services.
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-	oidcClient, err := a.getOIDCClient(connector, req.RedirectURL)
+	oidcClient, err := a.getOIDCClient(connector, req.ProxyAddress)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
@@ -241,7 +241,7 @@ func (a *Server) validateOIDCAuthCallback(q url.Values) (*oidcAuthResponse, erro
 		return nil, trace.Wrap(err)
 	}
 
-	oidcClient, err := a.getOIDCClient(connector, req.RedirectURL)
+	oidcClient, err := a.getOIDCClient(connector, req.ProxyAddress)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}

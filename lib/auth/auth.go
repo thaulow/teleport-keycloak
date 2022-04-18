@@ -308,7 +308,7 @@ var (
 //   - checks public keys to see if they're signed by it (can be trusted or not)
 type Server struct {
 	lock sync.RWMutex
-	// oidcClients is a map from authID -> redirectURL -> oidcClient
+	// oidcClients is a map from authID -> proxyAddr -> oidcClient
 	oidcClients   map[string]map[string]*oidcClient
 	samlProviders map[string]*samlProvider
 	githubClients map[string]*githubClient

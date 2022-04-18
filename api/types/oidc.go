@@ -272,7 +272,7 @@ func (o *OIDCConnectorV3) GetClientSecret() string {
 func (o *OIDCConnectorV3) GetRedirectURLs() []string {
 	// If RedirectURLs isn't set, default to the deprecated RedirectURL field.
 	// DELETE IN 11.0.0
-	if len(o.Spec.RedirectURLs) == 0 && o.Spec.RedirectURL != "" {
+	if o.Spec.RedirectURL != "" {
 		return []string{o.Spec.RedirectURL}
 	}
 	return o.Spec.RedirectURLs
@@ -348,10 +348,6 @@ func (o *OIDCConnectorV3) CheckAndSetDefaults() error {
 
 	if err := o.Metadata.CheckAndSetDefaults(); err != nil {
 		return trace.Wrap(err)
-	}
-
-	if len(o.GetRedirectURLs()) == 0 {
-		return trace.BadParameter("RedirectURL: missing redirect_urls, at least one must be provided")
 	}
 
 	if o.Metadata.Name == constants.Local {

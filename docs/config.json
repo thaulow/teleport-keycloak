@@ -77,7 +77,7 @@
               "slug": "/setup/admin/troubleshooting/"
             },
             {
-              "title": "Graceful Restarts",
+              "title": "Upgrading the Teleport Binary",
               "slug": "/setup/admin/graceful-restarts/"
             },
             {
@@ -113,7 +113,7 @@
               "slug": "/setup/operations/scaling/"
             },
             {
-              "title": "Upgrading",
+              "title": "Upgrading a Cluster",
               "slug": "/setup/operations/upgrading/"
             },
             {
@@ -213,6 +213,10 @@
             {
               "title": "Networking",
               "slug": "/setup/reference/networking/"
+            },
+            {
+              "title": "Signals",
+              "slug": "/setup/reference/signals/"
             }
           ]
         }

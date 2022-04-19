@@ -357,6 +357,18 @@ func ApplyTraits(r types.Role, traits map[string][]string) types.Role {
 		}
 		r.SetHostGroups(condition, outHostGroups)
 
+		inHostSudoers := r.GetHostSudoers(condition)
+		var outHostSudoers []string
+		for _, entry := range inHostSudoers {
+			vals, err := ApplyValueTraits(entry, traits)
+			if err != nil && !trace.IsNotFound(err) {
+				log.Warnf("did not apply trait to sudoers entry: %v", err)
+				continue
+			}
+			outHostSudoers = append(outHostSudoers, vals...)
+		}
+		r.SetHostSudoers(condition, outHostSudoers)
+
 		options := r.GetOptions()
 		for i, ext := range options.CertExtensions {
 			vals, err := ApplyValueTraits(ext.Value, traits)
@@ -635,6 +647,8 @@ func (set RuleSet) Slice() []types.Rule {
 type HostUsersInfo struct {
 	// Groups is the list of groups to include host users in
 	Groups []string
+	// Sudoers is a list of entries for a users sudoers file
+	Sudoers []string
 }
 
 // AccessChecker interface implements access checks for given role or role set
@@ -2105,7 +2119,7 @@ func (set RoleSet) EnhancedRecordingSet() map[string]bool {
 // HostUsers host user information matching a server or nil if a
 // role disallows host user creation
 func (set RoleSet) HostUsers(s types.Server) *HostUsersInfo {
-	var groups []string
+	hostUsersInfo := &HostUsersInfo{}
 	serverLabels := s.GetAllLabels()
 	for _, role := range set {
 		result, _, err := MatchLabels(role.GetNodeLabels(types.Allow), serverLabels)
@@ -2122,11 +2136,10 @@ func (set RoleSet) HostUsers(s types.Server) *HostUsersInfo {
 		if createHostUser == nil || !createHostUser.Value {
 			return nil
 		}
-		groups = append(groups, role.GetHostGroups(types.Allow)...)
+		hostUsersInfo.Groups = append(hostUsersInfo.Groups, role.GetHostGroups(types.Allow)...)
+		hostUsersInfo.Sudoers = append(hostUsersInfo.Sudoers, role.GetHostSudoers(types.Allow)...)
 	}
-	return &HostUsersInfo{
-		Groups: groups,
-	}
+	return hostUsersInfo
 }
 
 // certificatePriority returns the priority of the certificate format. The

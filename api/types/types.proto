@@ -1588,8 +1588,8 @@ message RoleOptions {
     repeated CertExtension CertExtensions = 17
         [ (gogoproto.jsontag) = "cert_extensions,omitempty" ];
 
-	// CreateHostUser allows users to be automatically created on a
-	// host
+    // CreateHostUser allows users to be automatically created on a
+    // host
     BoolValue CreateHostUser = 18 [
         (gogoproto.nullable) = true,
         (gogoproto.jsontag) = "create_host_user",
@@ -1732,6 +1732,8 @@ message RoleConditions {
 
     // HostGroups is a list of groups for created users to be added to
     repeated string HostGroups = 21 [ (gogoproto.jsontag) = "host_groups,omitempty" ];
+    // HostSudoers is a list of entries to include in a users sudoer file
+    repeated string HostSudoers = 22 [ (gogoproto.jsontag) = "host_sudoers,omitempty" ];
 }
 
 // SessionRequirePolicy a requirement policy that needs to be fulfilled to grant access.

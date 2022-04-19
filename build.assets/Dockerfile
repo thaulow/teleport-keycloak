@@ -99,6 +99,7 @@ RUN apt-get update -y --fix-missing && \
         zip \
         zlib1g-dev \
         xauth \
+		sudo \
         && \
     pip3 --no-cache-dir install yamllint && \
     dpkg-reconfigure locales && \

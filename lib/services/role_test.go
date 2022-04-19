@@ -4199,6 +4199,73 @@ func TestHostUsers_getGroups(t *testing.T) {
 	}
 }
 
+func TestHostUsers_HostSudoers(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		test    string
+		sudoers []string
+		roles   RoleSet
+		server  types.Server
+	}{
+		{
+			test: "test exact match, one sudoer entry, one role",
+			sudoers: []string{"%sudo	ALL=(ALL) ALL"},
+			roles: NewRoleSet(&types.RoleV5{
+				Spec: types.RoleSpecV5{
+					Allow: types.RoleConditions{
+						NodeLabels: types.Labels{"success": []string{"abc"}},
+						HostSudoers: []string{"%sudo	ALL=(ALL) ALL"},
+					},
+				},
+			}),
+			server: &types.ServerV2{
+				Metadata: types.Metadata{
+					Labels: map[string]string{
+						"success": "abc",
+					},
+				},
+			},
+		},
+		{
+			test:    "multiple roles, one not matching",
+			sudoers: []string{"sudoers entry 1", "sudoers entry 2"},
+			roles: NewRoleSet(&types.RoleV5{
+				Spec: types.RoleSpecV5{
+					Allow: types.RoleConditions{
+						NodeLabels:  types.Labels{"success": []string{"abc"}},
+						HostSudoers: []string{"sudoers entry 1"},
+					},
+				},
+			}, &types.RoleV5{
+				Spec: types.RoleSpecV5{
+					Allow: types.RoleConditions{
+						NodeLabels:  types.Labels{types.Wildcard: []string{types.Wildcard}},
+						HostSudoers: []string{"sudoers entry 2"},
+					},
+				},
+			}, &types.RoleV5{
+				Spec: types.RoleSpecV5{
+					Allow: types.RoleConditions{
+						NodeLabels:  types.Labels{"fail": []string{"abc"}},
+						HostSudoers: []string{"not present sudoers entry"},
+					},
+				},
+			}),
+			server: &types.ServerV2{
+				Metadata: types.Metadata{
+					Labels: map[string]string{
+						"success": "abc",
+					},
+				},
+			},
+		},
+	} {
+		t.Run(tc.test, func(t *testing.T) {
+			require.Equal(t, tc.sudoers, tc.roles.HostSudoers(tc.server))
+		})
+	}
+}
+
 func TestHostUsers_CanCreateHostUser(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {

@@ -38,8 +38,6 @@ import (
 	"github.com/gravitational/teleport/lib/reversetunnel"
 	"github.com/gravitational/teleport/lib/utils"
 
-	"github.com/gravitational/trace"
-
 	"github.com/jonboulle/clockwork"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
@@ -93,12 +91,12 @@ func TestServiceSelfSignedHTTPS(t *testing.T) {
 
 type monitorTest struct {
 	desc         string
-	event        *Event
+	event        Event
 	advanceClock time.Duration
 	wantStatus   int
 }
 
-func testMonitor(t *testing.T, sshEnabled bool, tests []monitorTest) {
+func testMonitor(t *testing.T, sshEnabled bool, initialEvents []Event, tests []monitorTest) {
 	fakeClock := clockwork.NewFakeClock()
 	cfg := MakeDefaultConfig()
 	cfg.Clock = fakeClock
@@ -118,28 +116,46 @@ func testMonitor(t *testing.T, sshEnabled bool, tests []monitorTest) {
 	process, err := NewTeleport(cfg)
 	require.NoError(t, err)
 
+	// these simulate events that happened to be broadcast before the
+	// readyz.monitor started listening for events
+	for _, event := range initialEvents {
+		process.BroadcastEvent(event)
+	}
+
+	require.NoError(t, process.Start())
+	t.Cleanup(func() {
+		require.NoError(t, process.Close())
+	})
+
 	diagAddr, err := process.DiagnosticAddr()
 	require.NoError(t, err)
 	require.NotNil(t, diagAddr)
-	endpoint := fmt.Sprintf("http://%v/readyz", diagAddr.String())
 
-	// Start Teleport and make sure the status is OK.
-	go func() {
-		require.NoError(t, process.Run())
-	}()
-	err = waitForStatus(endpoint, http.StatusOK)
-	require.NoError(t, err)
+	endpoint := fmt.Sprintf("http://%v/readyz", diagAddr.String())
+	getStatus := func() int {
+		resp, err := http.Get(endpoint)
+		require.NoError(t, err)
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	require.Eventually(t, func() bool {
+		return getStatus() == http.StatusOK
+	}, 5*time.Second, 100*time.Millisecond)
 
 	for _, tt := range tests {
 		t.Run(tt.desc, func(t *testing.T) {
 			fakeClock.Advance(tt.advanceClock)
-			if tt.event != nil {
-				process.BroadcastEvent(*tt.event)
+			if tt.event.Name != "" {
+				process.BroadcastEvent(tt.event)
 			}
-			err := waitForStatus(endpoint, tt.wantStatus)
-			require.NoError(t, err)
+			require.Eventually(t, func() bool {
+				return getStatus() == tt.wantStatus
+			}, 5*time.Second, 100*time.Millisecond)
 		})
 	}
+
+	require.NoError(t, process.Close())
 }
 
 func TestMonitorOneComponent(t *testing.T) {
@@ -148,32 +164,32 @@ func TestMonitorOneComponent(t *testing.T) {
 	tests := []monitorTest{
 		{
 			desc:       "it starts with OK state",
-			event:      nil,
+			event:      Event{},
 			wantStatus: http.StatusOK,
 		},
 		{
 			desc:       "degraded event causes degraded state",
-			event:      &Event{Name: TeleportDegradedEvent, Payload: teleport.ComponentAuth},
+			event:      Event{Name: TeleportDegradedEvent, Payload: teleport.ComponentAuth},
 			wantStatus: http.StatusServiceUnavailable,
 		},
 		{
 			desc:       "ok event causes recovering state",
-			event:      &Event{Name: TeleportOKEvent, Payload: teleport.ComponentAuth},
+			event:      Event{Name: TeleportOKEvent, Payload: teleport.ComponentAuth},
 			wantStatus: http.StatusBadRequest,
 		},
 		{
 			desc:       "ok event remains in recovering state because not enough time passed",
-			event:      &Event{Name: TeleportOKEvent, Payload: teleport.ComponentAuth},
+			event:      Event{Name: TeleportOKEvent, Payload: teleport.ComponentAuth},
 			wantStatus: http.StatusBadRequest,
 		},
 		{
 			desc:         "ok event after enough time causes OK state",
-			event:        &Event{Name: TeleportOKEvent, Payload: teleport.ComponentAuth},
+			event:        Event{Name: TeleportOKEvent, Payload: teleport.ComponentAuth},
 			advanceClock: defaults.HeartbeatCheckPeriod*2 + 1,
 			wantStatus:   http.StatusOK,
 		},
 	}
-	testMonitor(t, sshEnabled, tests)
+	testMonitor(t, sshEnabled, []Event{{Name: TeleportOKEvent, Payload: teleport.ComponentAuth}}, tests)
 }
 
 func TestMonitorTwoComponents(t *testing.T) {
@@ -182,32 +198,32 @@ func TestMonitorTwoComponents(t *testing.T) {
 	tests := []monitorTest{
 		{
 			desc:       "it starts with OK state",
-			event:      nil,
+			event:      Event{},
 			wantStatus: http.StatusOK,
 		},
 		{
 			desc:       "degraded event in one component causes degraded state",
-			event:      &Event{Name: TeleportDegradedEvent, Payload: teleport.ComponentNode},
+			event:      Event{Name: TeleportDegradedEvent, Payload: teleport.ComponentNode},
 			wantStatus: http.StatusServiceUnavailable,
 		},
 		{
 			desc:       "ok event in ok component keeps overall status degraded due to degraded component",
-			event:      &Event{Name: TeleportOKEvent, Payload: teleport.ComponentAuth},
+			event:      Event{Name: TeleportOKEvent, Payload: teleport.ComponentAuth},
 			wantStatus: http.StatusServiceUnavailable,
 		},
 		{
 			desc:       "ok event in degraded component causes overall recovering state",
-			event:      &Event{Name: TeleportOKEvent, Payload: teleport.ComponentNode},
+			event:      Event{Name: TeleportOKEvent, Payload: teleport.ComponentNode},
 			wantStatus: http.StatusBadRequest,
 		},
 		{
 			desc:         "ok event after enough time causes overall OK state",
 			advanceClock: defaults.HeartbeatCheckPeriod*2 + 1,
-			event:        &Event{Name: TeleportOKEvent, Payload: teleport.ComponentNode},
+			event:        Event{Name: TeleportOKEvent, Payload: teleport.ComponentNode},
 			wantStatus:   http.StatusOK,
 		},
 	}
-	testMonitor(t, sshEnabled, tests)
+	testMonitor(t, sshEnabled, nil, tests)
 }
 
 // TestServiceCheckPrincipals checks certificates regeneration only requests
@@ -488,28 +504,6 @@ func TestDesktopAccessFIPS(t *testing.T) {
 	cfg.WindowsDesktop.Enabled = true
 	_, err := NewTeleport(cfg)
 	require.Error(t, err)
-}
-
-func waitForStatus(diagAddr string, statusCode int) error {
-	tickCh := time.Tick(100 * time.Millisecond)
-	timeoutCh := time.After(10 * time.Second)
-	var lastStatus int
-	for {
-		select {
-		case <-tickCh:
-			resp, err := http.Get(diagAddr)
-			if err != nil {
-				return trace.Wrap(err)
-			}
-			resp.Body.Close()
-			lastStatus = resp.StatusCode
-			if resp.StatusCode == statusCode {
-				return nil
-			}
-		case <-timeoutCh:
-			return trace.BadParameter("timeout waiting for status: %v; last status: %v", statusCode, lastStatus)
-		}
-	}
 }
 
 type mockAccessPoint struct {

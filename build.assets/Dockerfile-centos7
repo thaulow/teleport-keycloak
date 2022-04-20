@@ -1,3 +1,5 @@
+# syntax = docker/dockerfile:1.4
+
 # Build libfido2 separately for isolation, speed and flexibility.
 FROM centos:7 AS libfido2
 
@@ -51,6 +53,22 @@ RUN git clone --depth=1 https://github.com/Yubico/libfido2.git -b 1.10.0 && \
 # Update ld.
     echo /usr/local/lib64 > /etc/ld.so.conf.d/libfido2.conf && \
     ldconfig
+
+# pkg-config file for libfido2-static.
+COPY <<EOF /usr/local/lib64/pkgconfig/libfido2-static.pc
+prefix=/usr/local
+exec_prefix=\${prefix}
+libdir=\${prefix}/lib64
+includedir=\${prefix}/include
+
+Name: libfido2
+Description: A FIDO2 library
+URL: https://github.com/yubico/libfido2
+Version: 1.10.0
+# All dependencies specified here for simplicity.
+Libs: \${libdir}/libfido2.a \${libdir}/libcbor.a \${libdir}/libudev.a \${libdir}/libcrypto.a -ldl -pthread
+Cflags: -I\${includedir}
+EOF
 
 FROM centos:7 AS buildbox
 
@@ -139,8 +157,7 @@ RUN cd /usr/local/lib64 && \
 # Update ld.
     echo /usr/local/lib64 > /etc/ld.so.conf.d/libfido2.conf && \
     ldconfig
-COPY pkgconfig/centos7/ /
-ENV PKG_CONFIG_PATH="/usr/local/lib64/pkgconfig:/usr/local/lib/pkgconfig"
+ENV PKG_CONFIG_PATH="/usr/local/lib64/pkgconfig"
 
 USER ci
 VOLUME ["/go/src/github.com/gravitational/teleport"]

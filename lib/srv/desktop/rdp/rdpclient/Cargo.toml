@@ -20,5 +20,5 @@ num-traits = "0.2.14"
 rand = { version = "0.8.5", features = ["getrandom"] }
 rand_chacha = "0.3.1"
 rsa = { version = "0.5.0", features = ["alloc"] }
-rdp-rs = { git = "https://github.com/gravitational/rdp-rs", rev = "f51222e7edeaf2954e2c02db3506aa36e02304ca" }
+rdp-rs = { git = "https://github.com/gravitational/rdp-rs", rev = "e84b829ed96956ea61715bc555ff287ce297cc3a" }
 uuid = { version = "0.8.2", features = ["v4"] }

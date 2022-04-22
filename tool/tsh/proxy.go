@@ -307,6 +307,16 @@ func onProxyCommandApp(cf *CLIConf) error {
 		return trace.Wrap(err)
 	}
 
+	app, err := getRegisteredApp(cf, tc)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	protocol := alpncommon.ProtocolHTTP
+	if strings.HasPrefix(app.GetURI(), "tcp://") {
+		protocol = "tcp"
+	}
+
 	address, err := utils.ParseAddr(tc.WebProxyAddr)
 	if err != nil {
 		return trace.Wrap(err)
@@ -325,7 +335,7 @@ func onProxyCommandApp(cf *CLIConf) error {
 	lp, err := alpnproxy.NewLocalProxy(alpnproxy.LocalProxyConfig{
 		Listener:           listener,
 		RemoteProxyAddr:    tc.WebProxyAddr,
-		Protocol:           alpncommon.ProtocolHTTP,
+		Protocol:           protocol,
 		InsecureSkipVerify: cf.InsecureSkipVerify,
 		ParentContext:      cf.Context,
 		SNI:                address.Host(),

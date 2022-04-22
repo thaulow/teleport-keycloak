@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"net"
 	"strings"
@@ -317,6 +318,7 @@ type HandlerFuncWithInfo func(ctx context.Context, conn net.Conn, info Connectio
 //    was set if yes forward to the generic TLS DB handler.
 // 6) Forward connection to the handler obtained in step 2.
 func (p *Proxy) handleConn(ctx context.Context, clientConn net.Conn) error {
+	fmt.Println("=== CONNECTION FROM", clientConn.RemoteAddr().String())
 	hello, conn, err := p.readHelloMessageWithoutTLSTermination(clientConn)
 	if err != nil {
 		return trace.Wrap(err)

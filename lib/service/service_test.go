@@ -91,7 +91,7 @@ func TestServiceSelfSignedHTTPS(t *testing.T) {
 
 type monitorTest struct {
 	desc         string
-	event        Event
+	event        *Event
 	advanceClock time.Duration
 	wantStatus   int
 }
@@ -146,8 +146,8 @@ func testMonitor(t *testing.T, sshEnabled bool, initialEvents []Event, tests []m
 	for _, tt := range tests {
 		t.Run(tt.desc, func(t *testing.T) {
 			fakeClock.Advance(tt.advanceClock)
-			if tt.event.Name != "" {
-				process.BroadcastEvent(tt.event)
+			if tt.event != nil {
+				process.BroadcastEvent(*tt.event)
 			}
 			require.Eventually(t, func() bool {
 				return getStatus() == tt.wantStatus
@@ -164,27 +164,27 @@ func TestMonitorOneComponent(t *testing.T) {
 	tests := []monitorTest{
 		{
 			desc:       "it starts with OK state",
-			event:      Event{},
+			event:      nil,
 			wantStatus: http.StatusOK,
 		},
 		{
 			desc:       "degraded event causes degraded state",
-			event:      Event{Name: TeleportDegradedEvent, Payload: teleport.ComponentAuth},
+			event:      &Event{Name: TeleportDegradedEvent, Payload: teleport.ComponentAuth},
 			wantStatus: http.StatusServiceUnavailable,
 		},
 		{
 			desc:       "ok event causes recovering state",
-			event:      Event{Name: TeleportOKEvent, Payload: teleport.ComponentAuth},
+			event:      &Event{Name: TeleportOKEvent, Payload: teleport.ComponentAuth},
 			wantStatus: http.StatusBadRequest,
 		},
 		{
 			desc:       "ok event remains in recovering state because not enough time passed",
-			event:      Event{Name: TeleportOKEvent, Payload: teleport.ComponentAuth},
+			event:      &Event{Name: TeleportOKEvent, Payload: teleport.ComponentAuth},
 			wantStatus: http.StatusBadRequest,
 		},
 		{
 			desc:         "ok event after enough time causes OK state",
-			event:        Event{Name: TeleportOKEvent, Payload: teleport.ComponentAuth},
+			event:        &Event{Name: TeleportOKEvent, Payload: teleport.ComponentAuth},
 			advanceClock: defaults.HeartbeatCheckPeriod*2 + 1,
 			wantStatus:   http.StatusOK,
 		},
@@ -198,28 +198,28 @@ func TestMonitorTwoComponents(t *testing.T) {
 	tests := []monitorTest{
 		{
 			desc:       "it starts with OK state",
-			event:      Event{},
+			event:      nil,
 			wantStatus: http.StatusOK,
 		},
 		{
 			desc:       "degraded event in one component causes degraded state",
-			event:      Event{Name: TeleportDegradedEvent, Payload: teleport.ComponentNode},
+			event:      &Event{Name: TeleportDegradedEvent, Payload: teleport.ComponentNode},
 			wantStatus: http.StatusServiceUnavailable,
 		},
 		{
 			desc:       "ok event in ok component keeps overall status degraded due to degraded component",
-			event:      Event{Name: TeleportOKEvent, Payload: teleport.ComponentAuth},
+			event:      &Event{Name: TeleportOKEvent, Payload: teleport.ComponentAuth},
 			wantStatus: http.StatusServiceUnavailable,
 		},
 		{
 			desc:       "ok event in degraded component causes overall recovering state",
-			event:      Event{Name: TeleportOKEvent, Payload: teleport.ComponentNode},
+			event:      &Event{Name: TeleportOKEvent, Payload: teleport.ComponentNode},
 			wantStatus: http.StatusBadRequest,
 		},
 		{
 			desc:         "ok event after enough time causes overall OK state",
 			advanceClock: defaults.HeartbeatCheckPeriod*2 + 1,
-			event:        Event{Name: TeleportOKEvent, Payload: teleport.ComponentNode},
+			event:        &Event{Name: TeleportOKEvent, Payload: teleport.ComponentNode},
 			wantStatus:   http.StatusOK,
 		},
 	}

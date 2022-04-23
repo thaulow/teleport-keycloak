@@ -53,6 +53,7 @@ func (b *Bot) Backport(ctx context.Context) error {
 			b.c.Environment.Organization,
 			b.c.Environment.Repository,
 			b.c.Environment.Number,
+			pull.UnsafeTitle,
 			base)
 		if err != nil {
 			status = "Failure"
@@ -100,7 +101,7 @@ func findBranches(labels []string) []string {
 
 // TODO(russjones): Manually test backport logic to make sure it is robot in
 // the case of failure to cherry-pick a commit.
-func (b *Bot) backportBranch(ctx context.Context, organization string, repository string, number int, base string) (int, error) {
+func (b *Bot) backportBranch(ctx context.Context, organization string, repository string, number int, title string, base string) (int, error) {
 	head := fmt.Sprintf("bot/backport-%v", number)
 
 	// Checkout the base branch that the Pull Request is being backported to.
@@ -139,7 +140,7 @@ func (b *Bot) backportBranch(ctx context.Context, organization string, repositor
 	num, err := b.c.GitHub.CreatePullRequest(ctx,
 		organization,
 		repository,
-		fmt.Sprintf("Backport #%v to %v", number, base),
+		fmt.Sprintf("[%v] %v", strings.Trim(base, "branch/"), title),
 		head,
 		base,
 		fmt.Sprintf("Backport #%v to %v", number, base))

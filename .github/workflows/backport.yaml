@@ -16,7 +16,6 @@ permissions:
 jobs:
   backport-pull-request:
     name: Backport Pull Request
-    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     steps:
       # Checkout master branch of Teleport repository. This is to prevent an

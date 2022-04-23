@@ -58,6 +58,15 @@ type Client interface {
 
 	// DeleteWorkflowRun is used to delete a workflow run.
 	DeleteWorkflowRun(ctx context.Context, organization string, repository string, runID int64) error
+
+	// CreateComment will leave a comment on an Issue or Pull Request.
+	CreateComment(ctx context.Context, organization string, repository string, number int, comment string) error
+
+	// CreatePullRequest will create a Pull Request.
+	CreatePullRequest(ctx context.Context, organization string, repository string, title string, head string, base string, body string) (int, error)
+
+	// ListCommits will list all the commits in a Pull Request.
+	ListCommits(ctx context.Context, organization string, repository string, number int) ([]string, error)
 }
 
 // Config contains configuration for the bot.

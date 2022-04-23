@@ -75,7 +75,7 @@ type Review struct {
 func (c *Client) ListReviews(ctx context.Context, organization string, repository string, number int) ([]Review, error) {
 	var reviews []Review
 
-	opt := &go_github.ListOptions{
+	opts := &go_github.ListOptions{
 		Page:    0,
 		PerPage: perPage,
 	}
@@ -84,7 +84,7 @@ func (c *Client) ListReviews(ctx context.Context, organization string, repositor
 			organization,
 			repository,
 			number,
-			opt)
+			opts)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
@@ -100,7 +100,7 @@ func (c *Client) ListReviews(ctx context.Context, organization string, repositor
 		if resp.NextPage == 0 {
 			break
 		}
-		opt.Page = resp.NextPage
+		opts.Page = resp.NextPage
 	}
 
 	// Sort oldest review first.
@@ -148,6 +148,15 @@ type PullRequest struct {
 	//
 	// https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#understanding-the-risk-of-script-injections
 	UnsafeBody string
+	// UnsafeLabels are the labels attached to the Pull Request.
+	//
+	// UnsafeLabels can be attacker controlled and should not be used in any
+	// security sensitive context. For example, don't use it when crafting a URL
+	// to send a request to or an access decision. See the following link for
+	// more details:
+	//
+	// https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#understanding-the-risk-of-script-injections
+	UnsafeLabels []string
 	// Fork determines if the pull request is from a fork.
 	Fork bool
 }
@@ -156,7 +165,7 @@ type PullRequest struct {
 func (c *Client) ListReviewers(ctx context.Context, organization string, repository string, number int) ([]string, error) {
 	var reviewers []string
 
-	opt := &go_github.ListOptions{
+	opts := &go_github.ListOptions{
 		Page:    0,
 		PerPage: perPage,
 	}
@@ -165,7 +174,7 @@ func (c *Client) ListReviewers(ctx context.Context, organization string, reposit
 			organization,
 			repository,
 			number,
-			opt)
+			opts)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
@@ -177,7 +186,7 @@ func (c *Client) ListReviewers(ctx context.Context, organization string, reposit
 		if resp.NextPage == 0 {
 			break
 		}
-		opt.Page = resp.NextPage
+		opts.Page = resp.NextPage
 	}
 
 	return reviewers, nil
@@ -193,15 +202,21 @@ func (c *Client) GetPullRequest(ctx context.Context, organization string, reposi
 		return PullRequest{}, trace.Wrap(err)
 	}
 
+	var labels []string
+	for _, label := range pull.Labels {
+		labels = append(labels, label.GetName())
+	}
+
 	return PullRequest{
-		Author:      pull.GetUser().GetLogin(),
-		Repository:  repository,
-		Number:      pull.GetNumber(),
-		State:       pull.GetState(),
-		UnsafeHead:  pull.GetHead().GetRef(),
-		UnsafeTitle: pull.GetTitle(),
-		UnsafeBody:  pull.GetBody(),
-		Fork:        pull.GetHead().GetRepo().GetFork(),
+		Author:       pull.GetUser().GetLogin(),
+		Repository:   repository,
+		Number:       pull.GetNumber(),
+		State:        pull.GetState(),
+		UnsafeHead:   pull.GetHead().GetRef(),
+		UnsafeTitle:  pull.GetTitle(),
+		UnsafeBody:   pull.GetBody(),
+		UnsafeLabels: labels,
+		Fork:         pull.GetHead().GetRepo().GetFork(),
 	}, nil
 }
 
@@ -209,7 +224,7 @@ func (c *Client) GetPullRequest(ctx context.Context, organization string, reposi
 func (c *Client) ListPullRequests(ctx context.Context, organization string, repository string, state string) ([]PullRequest, error) {
 	var pulls []PullRequest
 
-	opt := &go_github.PullRequestListOptions{
+	opts := &go_github.PullRequestListOptions{
 		State: state,
 		ListOptions: go_github.ListOptions{
 			Page:    0,
@@ -220,27 +235,33 @@ func (c *Client) ListPullRequests(ctx context.Context, organization string, repo
 		page, resp, err := c.client.PullRequests.List(ctx,
 			organization,
 			repository,
-			opt)
+			opts)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
 
 		for _, pull := range page {
+			var labels []string
+			for _, label := range pull.Labels {
+				labels = append(labels, label.GetName())
+			}
+
 			pulls = append(pulls, PullRequest{
-				Author:      pull.GetUser().GetLogin(),
-				Repository:  repository,
-				Number:      pull.GetNumber(),
-				State:       pull.GetState(),
-				UnsafeHead:  pull.GetHead().GetRef(),
-				UnsafeTitle: pull.GetTitle(),
-				UnsafeBody:  pull.GetBody(),
-				Fork:        pull.GetHead().GetRepo().GetFork(),
+				Author:       pull.GetUser().GetLogin(),
+				Repository:   repository,
+				Number:       pull.GetNumber(),
+				State:        pull.GetState(),
+				UnsafeHead:   pull.GetHead().GetRef(),
+				UnsafeTitle:  pull.GetTitle(),
+				UnsafeBody:   pull.GetBody(),
+				UnsafeLabels: labels,
+				Fork:         pull.GetHead().GetRepo().GetFork(),
 			})
 		}
 		if resp.NextPage == 0 {
 			break
 		}
-		opt.Page = resp.NextPage
+		opts.Page = resp.NextPage
 	}
 
 	return pulls, nil
@@ -250,7 +271,7 @@ func (c *Client) ListPullRequests(ctx context.Context, organization string, repo
 func (c *Client) ListFiles(ctx context.Context, organization string, repository string, number int) ([]string, error) {
 	var files []string
 
-	opt := &go_github.ListOptions{
+	opts := &go_github.ListOptions{
 		Page:    0,
 		PerPage: perPage,
 	}
@@ -259,7 +280,7 @@ func (c *Client) ListFiles(ctx context.Context, organization string, repository 
 			organization,
 			repository,
 			number,
-			opt)
+			opts)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
@@ -271,7 +292,7 @@ func (c *Client) ListFiles(ctx context.Context, organization string, repository 
 		if resp.NextPage == 0 {
 			break
 		}
-		opt.Page = resp.NextPage
+		opts.Page = resp.NextPage
 	}
 
 	return files, nil
@@ -305,7 +326,7 @@ type Workflow struct {
 func (c *Client) ListWorkflows(ctx context.Context, organization string, repository string) ([]Workflow, error) {
 	var workflows []Workflow
 
-	opt := &go_github.ListOptions{
+	opts := &go_github.ListOptions{
 		Page:    0,
 		PerPage: perPage,
 	}
@@ -313,7 +334,7 @@ func (c *Client) ListWorkflows(ctx context.Context, organization string, reposit
 		page, resp, err := c.client.Actions.ListWorkflows(ctx,
 			organization,
 			repository,
-			opt)
+			opts)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
@@ -333,7 +354,7 @@ func (c *Client) ListWorkflows(ctx context.Context, organization string, reposit
 		if resp.NextPage == 0 {
 			break
 		}
-		opt.Page = resp.NextPage
+		opts.Page = resp.NextPage
 	}
 
 	return workflows, nil
@@ -351,7 +372,7 @@ type Run struct {
 func (c *Client) ListWorkflowRuns(ctx context.Context, organization string, repository string, branch string, workflowID int64) ([]Run, error) {
 	var runs []Run
 
-	opt := &go_github.ListWorkflowRunsOptions{
+	opts := &go_github.ListWorkflowRunsOptions{
 		Branch: branch,
 		ListOptions: go_github.ListOptions{
 			Page:    0,
@@ -363,7 +384,7 @@ func (c *Client) ListWorkflowRuns(ctx context.Context, organization string, repo
 			organization,
 			repository,
 			workflowID,
-			opt)
+			opts)
 		if err != nil {
 			return nil, trace.Wrap(err)
 		}
@@ -382,7 +403,7 @@ func (c *Client) ListWorkflowRuns(ctx context.Context, organization string, repo
 		if resp.NextPage == 0 {
 			break
 		}
-		opt.Page = resp.NextPage
+		opts.Page = resp.NextPage
 	}
 
 	return runs, nil
@@ -406,6 +427,66 @@ func (c *Client) DeleteWorkflowRun(ctx context.Context, organization string, rep
 		return trace.Wrap(err)
 	}
 	return nil
+}
+
+// CreateComment will leave a comment on an Issue or Pull Request.
+func (c *Client) CreateComment(ctx context.Context, organization string, repository string, number int, comment string) error {
+	_, _, err := c.client.Issues.CreateComment(ctx,
+		organization,
+		repository,
+		number,
+		&go_github.IssueComment{
+			Body: &comment,
+		})
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	return nil
+}
+
+func (c *Client) CreatePullRequest(ctx context.Context, organization string, repository string, title string, head string, base string, body string) (int, error) {
+	pull, _, err := c.client.PullRequests.Create(ctx,
+		organization,
+		repository,
+		&go_github.NewPullRequest{
+			Title: &title,
+			Head:  &head,
+			Base:  &base,
+			Body:  &body,
+		})
+	if err != nil {
+		return 0, trace.Wrap(err)
+	}
+	return pull.GetNumber(), nil
+}
+
+func (c *Client) ListCommits(ctx context.Context, organization string, repository string, number int) ([]string, error) {
+	var commits []string
+
+	opts := &go_github.ListOptions{
+		Page:    0,
+		PerPage: perPage,
+	}
+	for {
+		page, resp, err := c.client.PullRequests.ListCommits(ctx,
+			organization,
+			repository,
+			number,
+			opts)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+
+		for _, commit := range page {
+			commits = append(commits, commit.GetSHA())
+		}
+
+		if resp.NextPage == 0 {
+			break
+		}
+		opts.Page = resp.NextPage
+	}
+	return commits, nil
 }
 
 const (

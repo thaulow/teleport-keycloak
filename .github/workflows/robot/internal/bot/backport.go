@@ -66,7 +66,7 @@ func (b *Bot) Backport(ctx context.Context) error {
 			Link: url.URL{
 				Scheme: "https",
 				Host:   "github.com",
-				Path:   path.Join("gravitational", "teleport", "pull", strconv.Itoa(number)),
+				Path:   path.Join(b.c.Environment.Organization, b.c.Environment.Repository, "pull", strconv.Itoa(number)),
 			},
 		})
 	}
@@ -102,23 +102,30 @@ func findBranches(labels []string) []string {
 // TODO(russjones): Manually test backport logic to make sure it is robot in
 // the case of failure to cherry-pick a commit.
 func (b *Bot) backportBranch(ctx context.Context, organization string, repository string, number int, title string, base string) (int, error) {
+	git("config", "--global", "user.email", "bot@goteleport.com")
+	git("config", "--global", "user.name", "github-actions")
+
 	head := fmt.Sprintf("bot/backport-%v", number)
 
-	// Checkout the base branch that the Pull Request is being backported to.
-	if err := git("checkout", base); err != nil {
+	// Fetch base and head branches and create the backport branch that tracks
+	// the branch the Pull Request will be backported to.
+	// TODO(russjones): Check for injection attacks here.
+	if err := git("fetch", "origin", base); err != nil {
+		return 0, trace.Wrap(err)
+	}
+	if err := git("fetch", "origin", b.c.Environment.UnsafeHead); err != nil {
+		return 0, trace.Wrap(err)
+	}
+	if err := git("checkout", "-b", head, "--track", fmt.Sprintf("origin/%v", base)); err != nil {
 		return 0, trace.Wrap(err)
 	}
 
-	// Get list of commits to backport, create backport branch, and cherry-pick
-	// commits onto it.
+	// Get list of commits to backport and cherry-pick to backport branch.
 	commits, err := b.c.GitHub.ListCommits(ctx,
 		organization,
 		repository,
 		number)
 	if err != nil {
-		return 0, trace.Wrap(err)
-	}
-	if err := git("checkout", "-b", head); err != nil {
 		return 0, trace.Wrap(err)
 	}
 	for _, commit := range commits {
@@ -131,7 +138,7 @@ func (b *Bot) backportBranch(ctx context.Context, organization string, repositor
 		}
 	}
 
-	// Push changes to GitHub.
+	// Push branch to origin (GitHub).
 	if err := git("push", "origin", head); err != nil {
 		return 0, trace.Wrap(err)
 	}
@@ -191,6 +198,6 @@ type Status struct {
 const table = `
 | Status | Branch | Pull Request |
 |--------|--------|--------------|
-{{range .}}
-| {{.Status}} | {{.Branch}} | {{.PullRequest}} |
-{{end}}`
+{{- range .}}
+| {{.Status}} | {{.Branch}} | {{.Link}} |
+{{- end}}`

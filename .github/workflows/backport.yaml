@@ -3,7 +3,8 @@
 name: Backport
 on:
   pull_request:
-    types: [merged]
+    types:
+      - closed
 
 # Limit the permissions on the GitHub token for this workflow to the subset
 # that is required. In this case, the backport workflow needs to be able to
@@ -16,6 +17,7 @@ permissions:
 jobs:
   backport-pull-request:
     name: Backport Pull Request
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
       # Checkout master branch of Teleport repository. This is to prevent an

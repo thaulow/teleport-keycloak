@@ -39,7 +39,7 @@ func main() {
 
 	setupLogger(config)
 
-	art, err := NewAptRepoTool(config, &supportedOSs)
+	art, err := NewAptRepoTool(config, supportedOSs)
 	if err != nil {
 		log.Fatal(err.Error())
 	}

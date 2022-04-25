@@ -69,9 +69,9 @@ func validateArtifactPath(value string) error {
 	}
 
 	if stat, err := os.Stat(value); os.IsNotExist(err) {
-		return trace.BadParameter("the artifact-path \"%s\" does not exist", value)
+		return trace.BadParameter("the artifact-path %q does not exist", value)
 	} else if !stat.IsDir() {
-		return trace.BadParameter("the artifact-path \"%s\" is not a directory", value)
+		return trace.BadParameter("the artifact-path %q is not a directory", value)
 	}
 
 	return nil

@@ -2,7 +2,6 @@ package main
 
 import (
 	"io/fs"
-	"log"
 	"path/filepath"
 	"strings"
 	"time"
@@ -15,11 +14,11 @@ type AptRepoTool struct {
 	config       *Config
 	aptly        *Aptly
 	s3Manager    *s3manager
-	supportedOSs *map[string][]string
+	supportedOSs map[string][]string
 }
 
 // Instantiates a new apt repo tool instance and performs any required setup/config.
-func NewAptRepoTool(config *Config, supportedOSs *map[string][]string) (*AptRepoTool, error) {
+func NewAptRepoTool(config *Config, supportedOSs map[string][]string) (*AptRepoTool, error) {
 	art := &AptRepoTool{
 		config:       config,
 		s3Manager:    NewS3Manager(config.bucketName),
@@ -35,7 +34,7 @@ func NewAptRepoTool(config *Config, supportedOSs *map[string][]string) (*AptRepo
 	return art, nil
 }
 
-// Runs the tool, performing all of the business logic outside of argument parsing.
+// Runs the tool, creating and updating APT repos based upon the current configuration.
 func (art *AptRepoTool) Run() error {
 	start := time.Now()
 	logrus.Infoln("Starting APT repo build process...")
@@ -70,8 +69,7 @@ func (art *AptRepoTool) Run() error {
 		return trace.Wrap(err, "failed to sync changes to S3 bucket")
 	}
 
-	execution_duration := time.Since(start).Round(time.Millisecond)
-	logrus.Infof("APT repo build process completed in %s\n", execution_duration)
+	logrus.Infof("APT repo build process completed in %s\n", time.Since(start).Round(time.Millisecond))
 	return nil
 }
 
@@ -94,7 +92,7 @@ func (art *AptRepoTool) publishRepos(repos []*Repo) error {
 
 		err := art.aptly.PublishRepos(osRepoList, osRepoList[0].os)
 		if err != nil {
-			return trace.Wrap(err, "failed to publish for os \"%s\"", osInfo)
+			return trace.Wrap(err, "failed to publish for os %q", osInfo)
 		}
 	}
 
@@ -111,7 +109,7 @@ func (art *AptRepoTool) recreateExistingRepos() ([]*Repo, error) {
 	for _, repo := range createdRepos {
 		err := art.aptly.ImportDebsFromExistingRepo(repo)
 		if err != nil {
-			return nil, trace.Wrap(err, "failed to import debs from existing repo \"%s\"", repo.Name())
+			return nil, trace.Wrap(err, "failed to import debs from existing repo %q", repo.Name())
 		}
 	}
 
@@ -126,9 +124,9 @@ func (art *AptRepoTool) createRepos() ([]*Repo, error) {
 		return nil, trace.Wrap(err, "failed to recreate existing repos")
 	}
 
-	createdNewRepos, err := art.aptly.CreateReposFromArtifactRequirements(*art.supportedOSs, art.config.releaseChannel, art.config.majorVersion)
+	createdNewRepos, err := art.aptly.CreateReposFromArtifactRequirements(art.supportedOSs, art.config.releaseChannel, art.config.majorVersion)
 	if err != nil {
-		log.Fatal(err.Error())
+		return nil, trace.Wrap(err, "failed to create new repos from artifact requirements")
 	}
 
 	repos := append(createdExistingRepos, createdNewRepos...)
@@ -137,7 +135,7 @@ func (art *AptRepoTool) createRepos() ([]*Repo, error) {
 }
 
 func (art *AptRepoTool) importNewDebs(repos []*Repo) error {
-	logrus.Debugf("Importing new debs into %d repos: \"%s\"\n", len(repos), strings.Join(RepoNames(repos), "\", \""))
+	logrus.Debugf("Importing new debs into %d repos: %q\n", len(repos), strings.Join(RepoNames(repos), "\", \""))
 	err := filepath.WalkDir(art.config.artifactPath,
 		func(debPath string, d fs.DirEntry, err error) error {
 			if err != nil {

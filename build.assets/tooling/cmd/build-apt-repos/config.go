@@ -11,25 +11,25 @@ import (
 )
 
 type Config struct {
-	artifactPath    *string
-	bucketName      *string
-	localBucketPath *string
-	majorVersion    *string
-	releaseChannel  *string
-	logLevel        *uint
-	logJson         *bool
+	artifactPath    string
+	bucketName      string
+	localBucketPath string
+	majorVersion    string
+	releaseChannel  string
+	logLevel        uint
+	logJson         bool
 }
 
 // Parses and validates the provided flags, returning the parsed arguments in a struct.
 func ParseFlags() (*Config, error) {
 	config := &Config{
-		artifactPath:    flag.String("artifact-path", "/artifacts", "Path to the filesystem tree containing the *.deb files to add to the APT repos"),
-		bucketName:      flag.String("bucket", "", "The name of the S3 bucket where the repo should be synced to/from"),
-		localBucketPath: flag.String("local-bucket-path", "/bucket", "The local path where the bucket should be synced to"),
-		majorVersion:    flag.String("artifact-major-version", "", "The major version of the artifacts that will be added to the APT repos"),
-		releaseChannel:  flag.String("artifact-release-channel", "", "The release channel of the APT repos that the artifacts should be added to"),
-		logLevel:        flag.Uint("log-level", uint(logrus.InfoLevel), "Log level from 0 to 6, 6 being the most verbose"),
-		logJson:         flag.Bool("log-json", false, "True if the log entries should use JSON format, false for text logging"),
+		artifactPath:    *flag.String("artifact-path", "/artifacts", "Path to the filesystem tree containing the *.deb files to add to the APT repos"),
+		bucketName:      *flag.String("bucket", "", "The name of the S3 bucket where the repo should be synced to/from"),
+		localBucketPath: *flag.String("local-bucket-path", "/bucket", "The local path where the bucket should be synced to"),
+		majorVersion:    *flag.String("artifact-major-version", "", "The major version of the artifacts that will be added to the APT repos"),
+		releaseChannel:  *flag.String("artifact-release-channel", "", "The release channel of the APT repos that the artifacts should be added to"),
+		logLevel:        *flag.Uint("log-level", uint(logrus.InfoLevel), "Log level from 0 to 6, 6 being the most verbose"),
+		logJson:         *flag.Bool("log-json", false, "True if the log entries should use JSON format, false for text logging"),
 	}
 
 	flag.Parse()
@@ -63,48 +63,48 @@ func Check(config *Config) error {
 	return nil
 }
 
-func validateArtifactPath(value *string) error {
-	if *value == "" {
+func validateArtifactPath(value string) error {
+	if value == "" {
 		return trace.BadParameter("the artifact-path flag should not be empty")
 	}
 
-	if stat, err := os.Stat(*value); os.IsNotExist(err) {
-		return trace.BadParameter("the artifact-path \"%s\" does not exist", *value)
+	if stat, err := os.Stat(value); os.IsNotExist(err) {
+		return trace.BadParameter("the artifact-path \"%s\" does not exist", value)
 	} else if !stat.IsDir() {
-		return trace.BadParameter("the artifact-path \"%s\" is not a directory", *value)
+		return trace.BadParameter("the artifact-path \"%s\" is not a directory", value)
 	}
 
 	return nil
 }
 
-func validateBucketName(value *string) error {
-	if *value == "" {
+func validateBucketName(value string) error {
+	if value == "" {
 		return trace.BadParameter("the bucket flag should not be empty")
 	}
 
 	return nil
 }
 
-func validateLocalBucketPath(value *string) error {
-	if *value == "" {
+func validateLocalBucketPath(value string) error {
+	if value == "" {
 		return trace.BadParameter("the local-bucket-path flag should not be empty")
 	}
 
-	if stat, err := os.Stat(*value); err == nil && !stat.IsDir() {
+	if stat, err := os.Stat(value); err == nil && !stat.IsDir() {
 		return trace.BadParameter("the local bucket path points to a file instead of a directory")
 	}
 
 	return nil
 }
 
-func validateMajorVersion(value *string) error {
-	if *value == "" {
+func validateMajorVersion(value string) error {
+	if value == "" {
 		return trace.BadParameter("the artifact-major-version flag should not be empty")
 	}
 
 	// Can somebody validate that all major versions (even for dev tags/etc.) should follow this pattern?
 	regex := `^v\d+$`
-	matched, err := regexp.MatchString(regex, *value)
+	matched, err := regexp.MatchString(regex, value)
 	if err != nil {
 		return trace.Wrap(err, "failed to validate the artifact major version flag via regex")
 	}
@@ -116,8 +116,8 @@ func validateMajorVersion(value *string) error {
 	return nil
 }
 
-func validateReleaseChannel(value *string) error {
-	if *value == "" {
+func validateReleaseChannel(value string) error {
+	if value == "" {
 		return trace.BadParameter("the artifact-release-channel flag should not be empty")
 	}
 
@@ -125,7 +125,7 @@ func validateReleaseChannel(value *string) error {
 	validReleaseChannels := []string{"stable"}
 
 	for _, validReleaseChannel := range validReleaseChannels {
-		if *value == validReleaseChannel {
+		if value == validReleaseChannel {
 			return nil
 		}
 	}
@@ -133,8 +133,8 @@ func validateReleaseChannel(value *string) error {
 	return trace.BadParameter("the release channel contains an invalid value. Valid values are: %s", strings.Join(validReleaseChannels, ","))
 }
 
-func validateLogLevel(value *uint) error {
-	if *value > 6 {
+func validateLogLevel(value uint) error {
+	if value > 6 {
 		return trace.BadParameter("the log-level flag should be between 0 and 6")
 	}
 

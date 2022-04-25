@@ -41,7 +41,7 @@ func promoteAptPipeline() pipeline {
 	p.Steps = []step{
 		{
 			Name:  "Publish debs to APT repos",
-			Image: "ubuntu:20.04",
+			Image: "golang:1.18.1-bullseye",
 			Environment: map[string]value{
 				"APT_S3_BUCKET": {
 					fromSecret: "APT_REPO_RFD0058_AWS_S3_BUCKET",
@@ -57,6 +57,8 @@ func promoteAptPipeline() pipeline {
 				"mkdir -m0700 $GNUPGHOME",
 				"echo \"$GPG_RPM_SIGNING_ARCHIVE\" | base64 -d | tar -xzf - -C $GNUPGHOME",
 				"chown -R root:root $GNUPGHOME", // This probably won't work (gpg1 needs to be able to read it), but it's worth trying
+				"apt update",
+				"apt install aptly -y",
 				"cd /go/src/github.com/gravitational/teleport/build.assets/tooling",
 				"export VERSION=\"v`cat /go/build/CURRENT_VERSION_TAG_GENERIC.txt`\"",
 				"export RELEASE_CHANNEL=\"stable\"", // The tool supports several release channels but I'm not sure where this should be configured

@@ -125,11 +125,13 @@ func TestWatcher(t *testing.T) {
 // TestWatcherRDSDynamicResource RDS dynamic resource registration where the ResourceMatchers should be always
 // evaluated for the dynamic registered resources.
 func TestWatcherCloudDynamicResource(t *testing.T) {
+	var db1, db2, db3 *types.DatabaseV3
 	ctx := context.Background()
 	testCtx := setupTestContext(ctx, t)
 
 	db0, err := makeStaticDatabase("db0", nil)
 	require.NoError(t, err)
+
 	reconcileCh := make(chan types.Databases)
 	testCtx.setupDatabaseServer(ctx, t, agentParams{
 		Databases: []types.Database{db0},
@@ -148,35 +150,41 @@ func TestWatcherCloudDynamicResource(t *testing.T) {
 		v3.URI = "mypostgresql.c6c8mwvfdgv0.us-west-2.rds.amazonaws.com"
 	}
 
-	// Created an RDS db dynamic resource that doesn't match any db service ResourceMatchers.
-	db1, err := makeDynamicDatabase("db1", map[string]string{"group": "z"}, withRDSURL)
-	require.NoError(t, err)
-	require.True(t, db1.IsRDS())
-	err = testCtx.authServer.CreateDatabase(ctx, db1)
-	require.NoError(t, err)
-	// The db1 should not be registered by the agent due to ResourceMatchers mismatch:
-	assertReconciledResource(t, reconcileCh, types.Databases{db0})
+	t.Run("dynamic resource - no match", func(t *testing.T) {
+		// Created an RDS db dynamic resource that doesn't match any db service ResourceMatchers.
+		db1, err = makeDynamicDatabase("db1", map[string]string{"group": "z"}, withRDSURL)
+		require.NoError(t, err)
+		require.True(t, db1.IsRDS())
+		err = testCtx.authServer.CreateDatabase(ctx, db1)
+		require.NoError(t, err)
+		// The db1 should not be registered by the agent due to ResourceMatchers mismatch:
+		assertReconciledResource(t, reconcileCh, types.Databases{db0})
+	})
 
-	// Create an RDS dynamic resource with labels that matches ResourceMatchers.
-	db2, err := makeDynamicDatabase("db2", map[string]string{"group": "a"}, withRDSURL)
-	require.NoError(t, err)
-	require.True(t, db2.IsRDS())
+	t.Run("dynamic resource - match", func(t *testing.T) {
+		// Create an RDS dynamic resource with labels that matches ResourceMatchers.
+		db2, err = makeDynamicDatabase("db2", map[string]string{"group": "a"}, withRDSURL)
+		require.NoError(t, err)
+		require.True(t, db2.IsRDS())
 
-	err = testCtx.authServer.CreateDatabase(ctx, db2)
-	require.NoError(t, err)
-	// The db2 service should be properly registered by the agent.
-	assertReconciledResource(t, reconcileCh, types.Databases{db0, db2})
+		err = testCtx.authServer.CreateDatabase(ctx, db2)
+		require.NoError(t, err)
+		// The db2 service should be properly registered by the agent.
+		assertReconciledResource(t, reconcileCh, types.Databases{db0, db2})
+	})
 
-	// Create an RDS Could resource with a label that doesn't match resource matcher.
-	db3, err := makeCouldDatabase("db3", map[string]string{"group": "z"})
-	require.NoError(t, err)
-	require.True(t, db3.IsRDS())
+	t.Run("cloud resource - no match", func(t *testing.T) {
+		// Create an RDS Cloud resource with a label that doesn't match resource matcher.
+		db3, err = makeCloudDatabase("db3", map[string]string{"group": "z"})
+		require.NoError(t, err)
+		require.True(t, db3.IsRDS())
 
-	// The db3 DB RDS Could origin resource should properly register by the agent even if  DB labels don't match
-	// any ResourceMatchers. The RDS Could origin databases relays could fetchers that return only matching databases.
-	err = testCtx.authServer.CreateDatabase(ctx, db3)
-	require.NoError(t, err)
-	assertReconciledResource(t, reconcileCh, types.Databases{db0, db2, db3})
+		// The db3 DB RDS Cloud origin resource should properly register by the agent even if  DB labels don't match
+		// any ResourceMatchers. The RDS Cloud origin databases relays could fetchers that return only matching databases.
+		err = testCtx.authServer.CreateDatabase(ctx, db3)
+		require.NoError(t, err)
+		assertReconciledResource(t, reconcileCh, types.Databases{db0, db2, db3})
+	})
 }
 
 func assertReconciledResource(t *testing.T, ch chan types.Databases, databases types.Databases) {
@@ -207,7 +215,7 @@ func makeDynamicDatabase(name string, labels map[string]string, opts ...makeData
 	}, opts...)
 }
 
-func makeCouldDatabase(name string, labels map[string]string) (*types.DatabaseV3, error) {
+func makeCloudDatabase(name string, labels map[string]string) (*types.DatabaseV3, error) {
 	return makeDatabase(name, labels, map[string]string{
 		types.OriginLabel: types.OriginCloud,
 	}, func(v3 *types.DatabaseSpecV3) {

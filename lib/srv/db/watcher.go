@@ -172,18 +172,13 @@ func (s *Server) matcher(resource types.ResourceWithLabels) bool {
 		return false
 	}
 
-	// In the case of CloudOrigin RDS or Redshift DB resources the matchers should be skipped.
-	if hasOriginCloudLabel(resource) && (database.IsRDS() || database.IsRedshift()) {
+	// In the case of CloudOrigin CouldHosted resources the matchers should be skipped.
+	if cloudOrigin(resource) && database.IsCloudHosted() {
 		return true // Cloud fetchers return only matching databases.
 	}
 	return services.MatchResourceLabels(s.cfg.ResourceMatchers, database)
 }
 
-func hasOriginCloudLabel(r types.ResourceWithLabels) bool {
-	for k, v := range r.GetAllLabels() {
-		if k == types.OriginLabel && v == types.OriginCloud {
-			return true
-		}
-	}
-	return false
+func cloudOrigin(r types.ResourceWithLabels) bool {
+	return r.Origin() == types.OriginCloud
 }

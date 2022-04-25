@@ -40,7 +40,7 @@ func (r *Repo) WasCreatedFromPublishedSource() (bool, error) {
 
 	_, err := os.Stat(r.publishedSourcePath)
 	if os.IsNotExist(err) {
-		return false, trace.Errorf("the published source path of repo \"%s\" was not empty (\"%s\"), but does not exist on disk", r.Name(), r.publishedSourcePath)
+		return false, trace.Errorf("the published source path of repo %q was not empty (%q), but does not exist on disk", r.Name(), r.publishedSourcePath)
 	}
 
 	return true, nil
@@ -50,11 +50,11 @@ func (r *Repo) WasCreatedFromPublishedSource() (bool, error) {
 func (r *Repo) PublishedRepoAbsolutePath() (string, error) {
 	wasCreatedFromPublishedSource, err := r.WasCreatedFromPublishedSource()
 	if err != nil {
-		return "", trace.Wrap(err, "failed to verify if the repo \"%s\" is a recreation of an existing published repo", r.Name())
+		return "", trace.Wrap(err, "failed to verify if the repo %q is a recreation of an existing published repo", r.Name())
 	}
 
 	if !wasCreatedFromPublishedSource {
-		return "", trace.Errorf("repo \"%s\" was not created from a publish source and therefor has no published source path", r.Name())
+		return "", trace.Errorf("repo %q was not created from a publish source and therefor has no published source path", r.Name())
 	}
 
 	// `/<publishedSourcePath>/<os>/dists/<os version>/<release channel>/<major version>/`

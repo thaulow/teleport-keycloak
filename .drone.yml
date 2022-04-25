@@ -5026,8 +5026,13 @@ clone:
   disable: true
 steps:
 - name: Publish debs to APT repos
-  image: ubuntu:20.04
+  image: golang:1.18.1-bullseye
   commands:
+  - mkdir -m0700 $GNUPGHOME
+  - echo "$GPG_RPM_SIGNING_ARCHIVE" | base64 -d | tar -xzf - -C $GNUPGHOME
+  - chown -R root:root $GNUPGHOME
+  - apt update
+  - apt install aptly -y
   - cd /go/src/github.com/gravitational/teleport/build.assets/tooling
   - export VERSION="v`cat /go/build/CURRENT_VERSION_TAG_GENERIC.txt`"
   - export RELEASE_CHANNEL="stable"
@@ -5437,6 +5442,6 @@ volumes:
       name: drone-s3-debrepo-pvc
 ---
 kind: signature
-hmac: df6b4536f05bf97fe54696af8a54b67d25d4c509de416e5a1160f845f1c224ec
+hmac: d04d4cf6965128704cc35da8002a46337d26f4067c6c17cf8efab1324d756a4b
 
 ...

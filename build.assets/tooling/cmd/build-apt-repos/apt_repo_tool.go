@@ -22,7 +22,7 @@ type AptRepoTool struct {
 func NewAptRepoTool(config *Config, supportedOSs *map[string][]string) (*AptRepoTool, error) {
 	art := &AptRepoTool{
 		config:       config,
-		s3Manager:    NewS3Manager(*config.bucketName),
+		s3Manager:    NewS3Manager(config.bucketName),
 		supportedOSs: supportedOSs,
 	}
 
@@ -40,7 +40,7 @@ func (art *AptRepoTool) Run() error {
 	start := time.Now()
 	logrus.Infoln("Starting APT repo build process...")
 
-	err := art.s3Manager.DownloadExistingRepo(*art.config.localBucketPath)
+	err := art.s3Manager.DownloadExistingRepo(art.config.localBucketPath)
 	if err != nil {
 		return trace.Wrap(err, "failed to sync existing repo from S3 bucket")
 	}
@@ -103,7 +103,7 @@ func (art *AptRepoTool) publishRepos(repos []*Repo) error {
 
 func (art *AptRepoTool) recreateExistingRepos() ([]*Repo, error) {
 	logrus.Infoln("Recreating previously published repos...")
-	createdRepos, err := art.aptly.CreateReposFromPublishedPath(*art.config.localBucketPath)
+	createdRepos, err := art.aptly.CreateReposFromPublishedPath(art.config.localBucketPath)
 	if err != nil {
 		return nil, trace.Wrap(err, "failed to recreate existing repos")
 	}
@@ -126,7 +126,7 @@ func (art *AptRepoTool) createRepos() ([]*Repo, error) {
 		return nil, trace.Wrap(err, "failed to recreate existing repos")
 	}
 
-	createdNewRepos, err := art.aptly.CreateReposFromArtifactRequirements(*art.supportedOSs, *art.config.releaseChannel, *art.config.majorVersion)
+	createdNewRepos, err := art.aptly.CreateReposFromArtifactRequirements(*art.supportedOSs, art.config.releaseChannel, art.config.majorVersion)
 	if err != nil {
 		log.Fatal(err.Error())
 	}
@@ -138,7 +138,7 @@ func (art *AptRepoTool) createRepos() ([]*Repo, error) {
 
 func (art *AptRepoTool) importNewDebs(repos []*Repo) error {
 	logrus.Debugf("Importing new debs into %d repos: \"%s\"\n", len(repos), strings.Join(RepoNames(repos), "\", \""))
-	err := filepath.WalkDir(*art.config.artifactPath,
+	err := filepath.WalkDir(art.config.artifactPath,
 		func(debPath string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return trace.Wrap(err, "failure while searching %s for debs", debPath)
@@ -157,7 +157,7 @@ func (art *AptRepoTool) importNewDebs(repos []*Repo) error {
 			for _, repo := range repos {
 				// Other checks could be added here to ensure that a given deb gets added to the correct repo
 				// such as name or parent directory, facilitating os-specific artifacts
-				if repo.majorVersion != *art.config.majorVersion || repo.releaseChannel != *art.config.releaseChannel {
+				if repo.majorVersion != art.config.majorVersion || repo.releaseChannel != art.config.releaseChannel {
 					continue
 				}
 

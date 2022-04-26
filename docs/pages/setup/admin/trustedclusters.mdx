@@ -21,18 +21,6 @@ This guide will explain how to:
 - Enable/disable trust between clusters.
 - Establish permission mapping between clusters using Teleport roles.
 
-<Details title="Teleport Node Tunneling" scope={["enterprise", "oss"]} scopeOnly opened>
-
-If your Nodes are deployed behind a firewall or otherwise not reachable by the
-Teleport Proxy Service, you can connect them to your Teleport cluster via
-Teleport Node Tunneling. Instead of connection to the Auth Service directly,
-each Node connects to the Proxy Service, and the Auth Service creates a reverse
-tunnel to the Node.
-
-Learn more in [Adding Nodes to the Cluster](./adding-nodes.mdx).
-
-</Details>
-
 ## How Trusted Clusters work
 
 Teleport can partition compute infrastructure into multiple clusters. A cluster

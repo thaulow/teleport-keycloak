@@ -3059,6 +3059,11 @@ func (process *TeleportProcess) initProxyEndpoint(conn *Connector) error {
 			}
 			return nil
 		})
+	} else {
+		// it's impossible to figure out from registerTeleportReadyEvent whether
+		// or not the proxy.kube service is supposed to be enabled
+		process.BroadcastEvent(Event{Name: ProxyKubeReady, Payload: nil})
+		process.BroadcastEvent(Event{Name: TeleportOKEvent, Payload: teleport.Component(teleport.ComponentProxy, teleport.ComponentProxyKube)})
 	}
 
 	// Start the database proxy server that will be accepting connections from
@@ -3463,8 +3468,6 @@ func (process *TeleportProcess) registerTeleportReadyEvent(cfg *Config) int {
 	proxyConfig := cfg.Proxy
 	if proxyConfig.Enabled {
 		eventMapping.In = append(eventMapping.In, ProxySSHReady)
-	}
-	if proxyConfig.Kube.Enabled && !proxyConfig.Kube.ListenAddr.IsEmpty() && !proxyConfig.DisableReverseTunnel {
 		eventMapping.In = append(eventMapping.In, ProxyKubeReady)
 	}
 

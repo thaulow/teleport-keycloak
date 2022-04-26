@@ -24,6 +24,7 @@ import (
 	"net/url"
 	"os/exec"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"text/template"
@@ -31,6 +32,7 @@ import (
 	"github.com/gravitational/trace"
 )
 
+// TODO(russjones): Validate user controlled input.
 func (b *Bot) Backport(ctx context.Context) error {
 	if !b.c.Review.IsInternal(b.c.Environment.Author) {
 		return trace.BadParameter("automatic backports are only supported for internal contributors")
@@ -44,38 +46,73 @@ func (b *Bot) Backport(ctx context.Context) error {
 		return trace.Wrap(err)
 	}
 
+	// Extract backport branches names from labels attached to the Pull
+	// Request. If no backports were requested, return right away.
 	branches := findBranches(pull.UnsafeLabels)
+	if len(branches) == 0 {
+		return nil
+	}
 
-	var statuses []Status
+	var rows []row
+
 	for _, base := range branches {
-		status := "Success"
-		number, err := b.backportBranch(ctx,
+		head := fmt.Sprintf("bot/backport-%v-%v", b.c.Environment.Number, base)
+
+		r := row{
+			Result: "Success",
+			Branch: base,
+		}
+
+		// Create and push git branch for backport to GitHub.
+		err := b.createBackportBranch(ctx,
 			b.c.Environment.Organization,
 			b.c.Environment.Repository,
 			b.c.Environment.Number,
 			pull.UnsafeTitle,
-			base)
+			base,
+			b.c.Environment.UnsafeHead,
+			head,
+		)
 		if err != nil {
-			status = "Failure"
-			log.Printf("Failed to backport %v to %v: %v.", b.c.Environment.Number, base, err)
+			r.Result = "Failure"
+			r.Error = err
+
+			rows = append(rows, r)
+			continue
 		}
 
-		statuses = append(statuses, Status{
-			Status: status,
-			Branch: base,
-			Link: url.URL{
-				Scheme: "https",
-				Host:   "github.com",
-				Path:   path.Join(b.c.Environment.Organization, b.c.Environment.Repository, "pull", strconv.Itoa(number)),
-			},
-		})
+		// Create Pull Request for backport.
+		number, err := b.c.GitHub.CreatePullRequest(ctx,
+			b.c.Environment.Organization,
+			b.c.Environment.Repository,
+			fmt.Sprintf("[%v] %v", strings.Trim(base, "branch/"), pull.UnsafeTitle),
+			head,
+			base,
+			fmt.Sprintf("Backport #%v to %v", b.c.Environment.Number, base))
+		if err != nil {
+			r.Result = "Failure"
+			r.Error = err
+
+			rows = append(rows, r)
+			continue
+		}
+
+		r.Link = url.URL{
+			Scheme: "https",
+			Host:   "github.com",
+			Path:   path.Join(b.c.Environment.Organization, b.c.Environment.Repository, "pull", strconv.Itoa(number)),
+		}
+		rows = append(rows, r)
 	}
 
 	err = b.updatePullRequest(ctx,
 		b.c.Environment.Organization,
 		b.c.Environment.Repository,
 		b.c.Environment.Number,
-		statuses)
+		data{
+			Author: b.c.Environment.Author,
+			Rows:   rows,
+		})
 	if err != nil {
 		return trace.Wrap(err)
 	}
@@ -96,28 +133,31 @@ func findBranches(labels []string) []string {
 		branches = append(branches, strings.TrimPrefix(label, "backport/"))
 	}
 
+	sort.Strings(branches)
+
 	return branches
 }
 
-// TODO(russjones): Manually test backport logic to make sure it is robot in
-// the case of failure to cherry-pick a commit.
-func (b *Bot) backportBranch(ctx context.Context, organization string, repository string, number int, title string, base string) (int, error) {
-	git("config", "--global", "user.email", "bot@goteleport.com")
-	git("config", "--global", "user.name", "github-actions")
+// createBackportBranch will create and push a git branch with all the commits
+// from a Pull Request on it.
+//
+// TODO(russjones): Refactor to use go-git (so similar git library) instead of
+// executing git from disk.
+func (b *Bot) createBackportBranch(ctx context.Context, organization string, repository string, number int, title string, base string, head string, newHead string) error {
+	if err := git("config", "--global", "user.name", "github-actions"); err != nil {
+		log.Printf("Failed to set user.name: %v.", err)
+	}
+	if err := git("config", "--global", "user.email", "github-actions@goteleport.com"); err != nil {
+		log.Printf("Failed to set user.email: %v.", err)
+	}
 
-	head := fmt.Sprintf("bot/backport-%v", number)
-
-	// Fetch base and head branches and create the backport branch that tracks
+	// Fetch base and head branches and create new backport branch that tracks
 	// the branch the Pull Request will be backported to.
-	// TODO(russjones): Check for injection attacks here.
-	if err := git("fetch", "origin", base); err != nil {
-		return 0, trace.Wrap(err)
+	if err := git("fetch", "origin", base, head); err != nil {
+		return trace.Wrap(err)
 	}
-	if err := git("fetch", "origin", b.c.Environment.UnsafeHead); err != nil {
-		return 0, trace.Wrap(err)
-	}
-	if err := git("checkout", "-b", head, "--track", fmt.Sprintf("origin/%v", base)); err != nil {
-		return 0, trace.Wrap(err)
+	if err := git("checkout", "-b", newHead, "--track", fmt.Sprintf("origin/%v", base)); err != nil {
+		return trace.Wrap(err)
 	}
 
 	// Get list of commits to backport and cherry-pick to backport branch.
@@ -126,44 +166,32 @@ func (b *Bot) backportBranch(ctx context.Context, organization string, repositor
 		repository,
 		number)
 	if err != nil {
-		return 0, trace.Wrap(err)
+		return trace.Wrap(err)
 	}
 	for _, commit := range commits {
 		if err := git("cherry-pick", commit); err != nil {
-			if err := git("cherry-pick", "--abort"); err != nil {
-				log.Printf("Failed to cherry-pick: %v.", err)
-				return 0, trace.Wrap(err)
+			if er := git("cherry-pick", "--abort"); er != nil {
+				return trace.NewAggregate(err, er)
 			}
-			return 0, trace.Wrap(err)
+			return trace.BadParameter("failed to cherry-pick %v", commit)
 		}
 	}
 
 	// Push branch to origin (GitHub).
-	if err := git("push", "origin", head); err != nil {
-		return 0, trace.Wrap(err)
+	if err := git("push", "origin", newHead); err != nil {
+		return trace.Wrap(err)
 	}
 
-	// Create Pull Request for backport.
-	num, err := b.c.GitHub.CreatePullRequest(ctx,
-		organization,
-		repository,
-		fmt.Sprintf("[%v] %v", strings.Trim(base, "branch/"), title),
-		head,
-		base,
-		fmt.Sprintf("Backport #%v to %v", number, base))
-	if err != nil {
-		return 0, trace.Wrap(err)
-	}
-	return num, nil
+	return nil
 }
 
 // updatePullRequest will leave a comment on the Pull Request with the status
 // of all backports.
-func (b *Bot) updatePullRequest(ctx context.Context, organization string, repository string, number int, statuses []Status) error {
+func (b *Bot) updatePullRequest(ctx context.Context, organization string, repository string, number int, d data) error {
 	var buf bytes.Buffer
 
 	t := template.Must(template.New("table").Parse(table))
-	if err := t.Execute(&buf, statuses); err != nil {
+	if err := t.Execute(&buf, d); err != nil {
 		return trace.Wrap(err)
 	}
 
@@ -183,21 +211,43 @@ func git(args ...string) error {
 	cmd := exec.Command("git", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("git %v; failed with %v; %v", strings.Join(args, " "), err, string(out))
-		return trace.Wrap(err)
+		return trace.BadParameter(string(out))
 	}
 	return nil
 }
 
-type Status struct {
-	Status string
+type data struct {
+	// Author of the Pull Request. If set, used to @author on GitHub so they
+	// get a notification.
+	Author string
+
+	// Rows represent backports.
+	Rows []row
+}
+
+type row struct {
+	// Result of the backport, either "Success" or "Failure".
+	Result string
+
+	// Output is set when "Result" is "Failure" and contains stdout and stderr
+	// from "git" with details why the cherry-pick failed.
+	Error error
+
+	// Branch is the name of the backport branch.
 	Branch string
-	Link   url.URL
+
+	// Link is a URL pointing to the created backport Pull Request.
+	Link url.URL
 }
 
 const table = `
-| Status | Branch | Pull Request |
-|--------|--------|--------------|
-{{- range .}}
-| {{.Status}} | {{.Branch}} | {{.Link}} |
-{{- end}}`
+{{if ne .Author ""}}
+@{{.Author}} Some backports failed, see table below.
+{{end}}
+
+| Result | Branch | Pull Request | Error |
+|--------|--------|--------------|-------|
+{{- range .Rows}}
+| {{.Result}} | {{.Branch}} | {{.Link}} | {{.Error}} |
+{{- end}}
+`

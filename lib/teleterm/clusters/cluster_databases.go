@@ -88,7 +88,7 @@ func (c *Cluster) GetDatabases(ctx context.Context) ([]Database, error) {
 }
 
 // ReissueDBCerts issues new certificates for specific DB access
-func (c *Cluster) ReissueDBCerts(ctx context.Context, user string, db types.Database) error {
+func (c *Cluster) ReissueDBCerts(ctx context.Context, user, dbName string, db types.Database) error {
 	// When generating certificate for MongoDB access, database username must
 	// be encoded into it. This is required to be able to tell which database
 	// user to authenticate the connection as.
@@ -102,6 +102,7 @@ func (c *Cluster) ReissueDBCerts(ctx context.Context, user string, db types.Data
 			ServiceName: db.GetName(),
 			Protocol:    db.GetProtocol(),
 			Username:    user,
+			Database:    dbName,
 		},
 		AccessRequests: c.status.ActiveRequests.AccessRequests,
 	})
@@ -114,6 +115,7 @@ func (c *Cluster) ReissueDBCerts(ctx context.Context, user string, db types.Data
 		ServiceName: db.GetName(),
 		Protocol:    db.GetProtocol(),
 		Username:    user,
+		Database:    dbName,
 	}, c.status)
 	if err != nil {
 		return trace.Wrap(err)

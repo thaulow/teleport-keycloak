@@ -63,6 +63,9 @@ const (
 	// ProtocolProxyGRPC is TLS ALPN protocol value used to indicate gRPC
 	// traffic intended for the Teleport proxy.
 	ProtocolProxyGRPC Protocol = "teleport-proxy-grpc"
+
+	//
+	ProtocolTCP Protocol = "tcp"
 )
 
 // SupportedProtocols is the list of supported ALPN protocols.
@@ -78,6 +81,7 @@ var SupportedProtocols = []Protocol{
 	ProtocolHTTP,
 	ProtocolHTTP2,
 	ProtocolAuth,
+	ProtocolTCP,
 }
 
 // ProtocolsToString converts the list of Protocols to the list of strings.

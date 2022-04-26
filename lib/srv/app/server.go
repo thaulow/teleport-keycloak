@@ -23,9 +23,12 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -181,6 +184,8 @@ type Server struct {
 
 	// watcher monitors changes to application resources.
 	watcher *services.AppWatcher
+
+	authMiddleware *auth.Middleware
 }
 
 // monitoredApps is a collection of applications from different sources
@@ -546,6 +551,7 @@ func (s *Server) ForceHeartbeat() error {
 // HandleConnection takes a connection and wraps it in a listener so it can
 // be passed to http.Serve to process as a HTTP request.
 func (s *Server) HandleConnection(conn net.Conn) {
+	fmt.Println("=== HANDLE CONNECTION ===")
 	// Wrap conn in a CloserConn to detect when it is closed.
 	// Returning early will close conn before it has been serviced.
 	// httpServer will initiate the close call.
@@ -553,10 +559,40 @@ func (s *Server) HandleConnection(conn net.Conn) {
 
 	// Wrap a TLS authorizing conn in a single-use listener.
 	tlsConn := tls.Server(closerConn, s.tlsConfig)
+
+	if err := tlsConn.Handshake(); err != nil {
+		s.log.WithError(err).Error("TLS handshake failed.")
+		return
+	}
+	fmt.Printf("---> APP SERVER CONN STATE: %#v\n", tlsConn.ConnectionState())
+
+	ctx, err := s.authMiddleware.WrapContextWithUser(s.closeContext, tlsConn)
+	if err != nil {
+		s.log.WithError(err).Error("Failed to extract identity from connection.")
+		return
+	}
+
+	id, app, err := s.authorizeContext(ctx)
+	if err != nil {
+		s.log.WithError(err).Error("Failed to authorize context.")
+		return
+	}
+	fmt.Printf("--> APP SERVER IDENTITY: %#v\n", id)
+	fmt.Printf("--> APP SERVER APP: %#v\n", app)
+
+	if strings.HasPrefix(app.GetURI(), "tcp://") {
+		err := s.handleTCPConnection(s.closeContext, tlsConn, id, app)
+		if err != nil {
+			s.log.WithError(err).Error("Failed to handle TCP connection.")
+			return
+		}
+		return
+	}
+
 	listener := newListener(s.closeContext, tlsConn)
 
 	// Serve will return as soon as tlsConn is running in its own goroutine
-	err := s.httpServer.Serve(listener)
+	err = s.httpServer.Serve(listener)
 	if err != nil && !errors.Is(err, errListenerConnServed) {
 		// okay to ignore errListenerConnServed; it is a signal that our
 		// single-use listener has passed the connection to http.Serve
@@ -567,6 +603,41 @@ func (s *Server) HandleConnection(conn net.Conn) {
 
 	// Wait for connection to close.
 	closerConn.Wait()
+}
+
+func (s *Server) handleTCPConnection(ctx context.Context, clientConn net.Conn, identity *tlsca.Identity, app types.Application) error {
+	addr, err := utils.ParseAddr(app.GetURI())
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	serverConn, err := net.Dial("tcp", addr.String())
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	errCh := make(chan error)
+	go func() {
+		defer serverConn.Close()
+		defer clientConn.Close()
+		_, err := io.Copy(serverConn, clientConn)
+		errCh <- err
+	}()
+	go func() {
+		defer serverConn.Close()
+		defer clientConn.Close()
+		_, err := io.Copy(clientConn, serverConn)
+		errCh <- err
+	}()
+	for i := 0; i < 2; i++ {
+		select {
+		case err := <-errCh:
+			if err != nil && !utils.IsOKNetworkError(err) {
+				s.log.Warnf("%v", err)
+			}
+		case <-ctx.Done():
+			return nil
+		}
+	}
+	return nil
 }
 
 // ServeHTTP will forward the *http.Request to the target application.
@@ -630,8 +701,12 @@ func (s *Server) serveHTTP(w http.ResponseWriter, r *http.Request) error {
 // authorize will check if request carries a session cookie matching a
 // session in the backend.
 func (s *Server) authorize(ctx context.Context, r *http.Request) (*tlsca.Identity, types.Application, error) {
+	return s.authorizeContext(r.Context())
+}
+
+func (s *Server) authorizeContext(ctx context.Context) (*tlsca.Identity, types.Application, error) {
 	// Only allow local and remote identities to proxy to an application.
-	userType := r.Context().Value(auth.ContextUser)
+	userType := ctx.Value(auth.ContextUser)
 	switch userType.(type) {
 	case auth.LocalUser, auth.RemoteUser:
 	default:
@@ -639,14 +714,14 @@ func (s *Server) authorize(ctx context.Context, r *http.Request) (*tlsca.Identit
 	}
 
 	// Extract authorizing context and identity of the user from the request.
-	authContext, err := s.c.Authorizer.Authorize(r.Context())
+	authContext, err := s.c.Authorizer.Authorize(ctx)
 	if err != nil {
 		return nil, nil, trace.Wrap(err)
 	}
 	identity := authContext.Identity.GetIdentity()
 
 	// Fetch the application and check if the identity has access.
-	app, err := s.getApp(r.Context(), identity.RouteToApp.PublicAddr)
+	app, err := s.getApp(ctx, identity.RouteToApp.PublicAddr)
 	if err != nil {
 		return nil, nil, trace.Wrap(err)
 	}
@@ -728,14 +803,14 @@ func (s *Server) getApp(ctx context.Context, publicAddr string) (types.Applicati
 func (s *Server) newHTTPServer() *http.Server {
 	// Reuse the auth.Middleware to authorize requests but only accept
 	// certificates that were specifically generated for applications.
-	authMiddleware := &auth.Middleware{
+	s.authMiddleware = &auth.Middleware{
 		AccessPoint:   s.c.AccessPoint,
 		AcceptedUsage: []string{teleport.UsageAppsOnly},
 	}
-	authMiddleware.Wrap(s)
+	s.authMiddleware.Wrap(s)
 
 	return &http.Server{
-		Handler:           authMiddleware,
+		Handler:           s.authMiddleware,
 		ReadHeaderTimeout: apidefaults.DefaultDialTimeout,
 		ErrorLog:          utils.NewStdlogger(s.log.Error, teleport.ComponentApp),
 	}

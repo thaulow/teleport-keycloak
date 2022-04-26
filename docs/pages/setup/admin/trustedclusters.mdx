@@ -4,9 +4,16 @@ description: How to configure access and trust between two SSH and Kubernetes en
 h1: Trusted Clusters
 ---
 
-Trusted Clusters enable Teleport users to connect to compute infrastructure
-located behind firewalls without any open TCP ports. The real-world usage
-examples of this capability include:
+Teleport can partition compute infrastructure into multiple clusters. A cluster
+is a group of Teleport resources connected to the cluster's Auth Service, which
+acts as a certificate authority (CA) for all users and Nodes in the cluster.
+
+Trusted Clusters allow the users of one cluster, the **root cluster**, to
+seamlessly SSH into the Nodes of another cluster, the **leaf cluster**, while
+remaining authenticated with only a single Proxy Service. The leaf cluster can
+be running behind a firewall with no TCP ports open to the root cluster.
+
+Uses for Trusted Clusters include:
 
 - Managed service providers (MSP) remotely managing the infrastructure of their clients.
 - Device manufacturers remotely maintaining computing appliances deployed on premises.
@@ -20,17 +27,6 @@ This guide will explain how to:
 - Add and remove Trusted Clusters using CLI commands.
 - Enable/disable trust between clusters.
 - Establish permission mapping between clusters using Teleport roles.
-
-## How Trusted Clusters work
-
-Teleport can partition compute infrastructure into multiple clusters. A cluster
-is a group of Teleport resources connected to the cluster's Auth Service, which
-acts as a certificate authority (CA) for all users and Nodes in the cluster.
-
-Trusted Clusters allow the users of one cluster, the **root cluster**, to
-seamlessly SSH into the Nodes of another cluster, the **leaf cluster**, while
-remaining authenticated with only a single Proxy Service. Users do not need to
-have a direct connection to other clusters' Proxy Service.
 
 ## Prerequisites
 
@@ -51,97 +47,9 @@ have a direct connection to other clusters' Proxy Service.
   [Getting Started on a Linux Server](../../getting-started/linux-server.mdx),
   this step will already be complete.
 
-**Leaf clusters** allow Teleport administrators to connect multiple clusters and
-establish trust between them. 
-
 (!docs/pages/includes/permission-warning.mdx!)
 
-The user experience looks like this:
-
-<Tabs>
-<TabItem scope={["oss", "enterprise"]} label="Self-Hosted">
-
-```code
-# Log in using the root "root" cluster credentials:
-$ tsh login --proxy=root.example.com
-
-# SSH into some host inside the "root" cluster:
-$ tsh ssh host
-
-# SSH into the host located in another cluster called "leaf"
-# The connection is established through root.example.com:
-$ tsh ssh --cluster=leaf host
-
-# See what other clusters are available
-$ tsh clusters
-```
-
-</TabItem>
-<TabItem scope={["cloud"]} label="Teleport Cloud">
-
-```code
-# Log in using the root "root" cluster credentials:
-$ tsh login --proxy=mytenant.teleport.sh
-
-# SSH into some host inside the "root" cluster:
-$ tsh ssh host
-
-# SSH into the host located in another cluster called "leaf"
-# The connection is established through root.example.com:
-$ tsh ssh --cluster=leaf host
-
-# See what other clusters are available
-$ tsh clusters
-```
-
-</TabItem>
-</Tabs>
-
-Once a connection has been established, it's easy to switch from the root cluster.
-![Teleport Cluster Page](../../../img/trusted-clusters/teleport-trusted-cluster.png)
-
-Let's take a look at how a connection is established between the "root" cluster
-and the "leaf" cluster:
-
-![Tunnels](../../../img/tunnel.svg)
-
-This setup works as follows: the "leaf" creates an outbound reverse SSH tunnel
-to "root" and keeps the tunnel open. When a user tries to connect to a Node
-inside "leaf" using the root's Proxy Service, the reverse tunnel is used to establish
-this connection shown as the green line above.
-
-**Accessibility only works in one direction.** The "leaf" cluster allows users
-from "root" to access its Nodes, but users in the "leaf" cluster cannot access
-the "root" cluster.
-
-
-<Admonition
-  type="tip"
-  title="Load Balancers"
->
-
-  The scheme above also works even if the "root" cluster uses multiple proxies
-  behind a load balancer (LB) or a DNS entry with multiple values. This works by
-  "leaf" establishing a tunnel to *every* proxy in "root".
-  
-  This requires that an LB use a round-robin or a similar balancing algorithm.
-  Do not use sticky load balancing algorithms (a.k.a. "session affinity" or
-  "sticky sessions") with Teleport Proxies.
-
-</Admonition>
-
-## Join Tokens
-
-Let's start with a diagram of how a connection between two clusters is established:
-
-![Tunnels](../../../img/trusted-clusters/TrustedClusters-Simple.svg)
-
-The first step in establishing a secure tunnel between two clusters is for the
-*leaf* cluster "leaf" to connect to the *root* cluster "root". When this happens
-for *the first time*, clusters know nothing about each other, thus a shared
-secret needs to exist for "root" to accept the connection from "leaf".
-
-This shared secret is called a "join token". 
+## Step 1/4. Establish trust between clusters
 
 Before following these instructions, you should make sure that you can connect
 to Teleport.
@@ -301,7 +209,53 @@ $ tctl create cluster.yaml
 
 At this point, the users of the "root" cluster should be able to see "leaf" in the list of available clusters.
 
-## RBAC
+## Step 2/4. Manage access to your Trusted Cluster
+
+### Apply labels
+
+Teleport gives administrators of root clusters the ability to control cluster labels.
+Allowing leaf clusters to propagate their own labels could create a problem with
+rogue clusters updating their labels to bad values.
+
+An administrator of a root cluster can control the labels of a remote cluster or
+a leaf cluster using the remote cluster API without any fear of override:
+
+```code
+$ tctl get rc
+
+# kind: remote_cluster
+# metadata:
+#  name: two
+# status:
+#  connection: online
+#  last_heartbeat: "2020-09-14T03:13:59.35518164Z"
+# version: v3
+```
+
+Using `tctl` to update the labels on the remote/leaf cluster:
+
+```code
+$ tctl update rc/two --set-labels=env=prod
+
+# Cluster two has been updated
+```
+
+Using `tctl` to confirm that the updated labels have been set:
+
+```code
+$ tctl get rc
+
+# kind: remote_cluster
+# metadata:
+#   labels:
+#    env: prod
+#  name: two
+# status:
+#  connection: online
+#  last_heartbeat: "2020-09-14T03:13:59.35518164Z"
+```
+
+### Edit role mappings
 
 When a leaf cluster establishes trust with a root cluster, it needs a way to
 configure which users from "root" should be allowed in and what permissions
@@ -317,7 +271,6 @@ root cluster map to roles on the leaf cluster.
 To update the role map for an existing Trusted Cluster, delete and re-create the cluster with the updated role map.
 </Notice>
 
-### Using dynamic resources
 We will illustrate the use of dynamic resources to configure Trusted Cluster
 RBAC with an example.
 
@@ -429,156 +382,12 @@ another. Our regular expression syntax enables you to use capture groups to refe
     local: [local-$1]
 ```
 
-Regular expressions use Google's re2 syntax, which you can read about here:
-
-[Syntax](https://github.com/google/re2/wiki/Syntax)
-
-<Notice type="tip">
 Regular expression matching is activated only when the expression starts
 with `^` and ends with `$`.
-</Notice>
 
-<Details title="Trusted Cluster UI" scopeOnly opened scope={["cloud", "enterprise"]}>
-You can easily configure leaf nodes using the Teleport Web UI.
+Regular expressions use Google's re2 syntax, which you can read about in the re2 [syntax guide](https://github.com/google/re2/wiki/Syntax).
 
-Here is an example of creating trust between a leaf and a root node.
-![Tunnels](../../../img/trusted-clusters/setting-up-trust.png)
-</Details>
-
-## Updating the Trusted Cluster role map
-
-To update the role map for a Trusted Cluster, first, we'll need to remove the cluster by executing:
-
-```code
-$ tctl rm tc/root-cluster
-```
-
-When this is complete, we can re-create the cluster by executing:
-
-```code
-$ tctl create root-user-updated-role.yaml
-```
-
-## Updating cluster labels
-
-Teleport gives administrators of root clusters the ability to control cluster labels.
-Allowing leaf clusters to propagate their own labels could create a problem with
-rogue clusters updating their labels to bad values.
-
-An administrator of a root cluster can control the labels of a remote cluster or
-a leaf cluster using the remote cluster API without any fear of override:
-
-```code
-$ tctl get rc
-
-# kind: remote_cluster
-# metadata:
-#  name: two
-# status:
-#  connection: online
-#  last_heartbeat: "2020-09-14T03:13:59.35518164Z"
-# version: v3
-```
-
-Using `tctl` to update the labels on the remote/leaf cluster:
-
-```code
-$ tctl update rc/two --set-labels=env=prod
-
-# Cluster two has been updated
-```
-
-Using `tctl` to confirm that the updated labels have been set:
-
-```code
-$ tctl get rc
-
-# kind: remote_cluster
-# metadata:
-#   labels:
-#    env: prod
-#  name: two
-# status:
-#  connection: online
-#  last_heartbeat: "2020-09-14T03:13:59.35518164Z"
-```
-
-## Using Trusted Clusters
-
-Once Trusted Clusters are set up, an admin from the root cluster can see and
-access the leaf cluster:
-
-```code
-# Log into the root cluster:
-$ tsh --proxy=root.example.com login admin
-```
-
-```code
-# See the list of available clusters
-$ tsh clusters
-
-# Cluster Name   Status
-# ------------   ------
-# root           online
-# leaf           online
-```
-
-```code
-# See the list of machines (nodes) behind the leaf cluster:
-$ tsh ls --cluster=leaf
-
-# Node Name Node ID            Address        Labels
-# --------- ------------------ -------------- -----------
-# db1.leaf  cf7cc5cd-935e-46f1 10.0.5.2:3022  role=db-leader
-# db2.leaf  3879d133-fe81-3212 10.0.5.3:3022  role=db-follower
-```
-
-```code
-# SSH into any node in "leaf":
-$ tsh ssh --cluster=leaf user@db1.leaf
-```
-
-<Admonition
-  type="tip"
-  title="Note"
->
-  Trusted Clusters work only one way. In the example above, users from "leaf"
-  cannot see or connect to the nodes in "root".
-</Admonition>
-
-## Disabling trust
-
-To temporarily disable trust between clusters, i.e. to disconnect the "leaf"
-cluster from "root", edit the YAML definition of the `trusted_cluster` resource
-and set `enabled` to "false", then update it:
-
-```code
-$ tctl create --force cluster.yaml
-```
-
-### Remove a leaf cluster relationship from both sides
-
-Once established, to fully remove a trust relationship between two clusters, do
-the following:
-
-- Remove the relationship from the leaf cluster: `tctl rm tc/root.example.com` (`tc` = Trusted Cluster)
-- Remove the relationship from the root cluster: `tctl rm rc/leaf.example.com` (`rc` = remote cluster)
-
-### Remove a leaf cluster relationship from the root
-
-Remove the relationship from the root cluster: `tctl rm rc/leaf.example.com`.
-
-<Admonition type="note">
-  The `leaf.example.com` cluster will continue to try and ping the root cluster,
-  but will not be able to connect. To re-establish the Trusted Cluster relationship,
-  the Trusted Cluster has to be created again from the leaf cluster.
-</Admonition>
-
-### Remove a leaf cluster relationship from the leaf
-
-Remove the relationship from the leaf cluster: `tctl rm tc/root.example.com`.
-
-## Sharing user traits between Trusted Clusters
+<Details title="Sharing user traits between Trusted Clusters">
 
 You can share user SSH logins, Kubernetes users/groups, and database users/names between Trusted Clusters.
 
@@ -623,34 +432,109 @@ node_labels:
   env: "{{external.env_from_okta}}"
 ```
 
-## How does it work?
+</Details>
 
-At a first glance, Trusted Clusters in combination with RBAC may seem
-complicated. However, it is based on certificate-based SSH authentication
-which is fairly easy to reason about.
+<Details title="Trusted Cluster UI" scopeOnly opened scope={["cloud", "enterprise"]}>
+You can easily configure leaf nodes using the Teleport Web UI.
 
-One can think of an SSH certificate as a "permit" issued and time-stamped by a
-certificate authority. A certificate contains four important pieces of data:
+Here is an example of creating trust between a leaf and a root node.
+![Tunnels](../../../img/trusted-clusters/setting-up-trust.png)
+</Details>
 
-- List of allowed Unix logins a user can use. They are called "principals" in
-  the certificate.
-- Signature of the certificate authority that issued it (the Teleport Auth Service)
-- Metadata (certificate extensions): additional data protected by the signature
-  above. Teleport uses the metadata to store the list of user roles and SSH
-  options like "permit-agent-forwarding".
-- The expiration date.
+<Details title="Updating your Trusted Cluster role mapping">
 
-Try executing `tsh status` right after `tsh login` to see all these fields in the
-client certificate.
+To update the role map for a Trusted Cluster, first, we'll need to remove the
+cluster by executing:
 
-When a user from the root cluster tries to connect to a node inside "leaf", the user's
-certificate is presented to the Auth Service of "leaf" and it performs the
-following checks:
+```code
+$ tctl rm tc/root-cluster
+```
 
-- Checks that the certificate signature matches one of the Trusted Clusters.
-- Tries to find a local role that maps to the list of principals found in the certificate.
-- Checks if the local role allows the requested identity (Unix login) to have access.
-- Checks that the certificate has not expired.
+When this is complete, we can re-create the cluster by executing:
+
+```code
+$ tctl create root-user-updated-role.yaml
+```
+
+</Details>
+
+## Step 3/4. Access a Node in your remote cluster
+
+Once Trusted Clusters are set up, an admin from the root cluster can see and
+access the leaf cluster:
+
+```code
+# Log into the root cluster:
+$ tsh --proxy=root.example.com login admin
+```
+
+Once a connection has been established, it's easy to switch from the root cluster.
+![Teleport Cluster Page](../../../img/trusted-clusters/teleport-trusted-cluster.png)
+
+```code
+# See the list of available clusters
+$ tsh clusters
+
+# Cluster Name   Status
+# ------------   ------
+# root           online
+# leaf           online
+```
+
+```code
+# See the list of machines (nodes) behind the leaf cluster:
+$ tsh ls --cluster=leaf
+
+# Node Name Node ID            Address        Labels
+# --------- ------------------ -------------- -----------
+# db1.leaf  cf7cc5cd-935e-46f1 10.0.5.2:3022  role=db-leader
+# db2.leaf  3879d133-fe81-3212 10.0.5.3:3022  role=db-follower
+```
+
+```code
+# SSH into any node in "leaf":
+$ tsh ssh --cluster=leaf user@db1.leaf
+```
+
+<Admonition
+  type="tip"
+  title="Note"
+>
+  Trusted Clusters work only one way. In the example above, users from "leaf"
+  cannot see or connect to the nodes in "root".
+</Admonition>
+
+## Step 4/4. Disable trust between your clusters
+
+To temporarily disable trust between clusters, i.e. to disconnect the "leaf"
+cluster from "root", edit the YAML definition of the `trusted_cluster` resource
+and set `enabled` to "false", then update it:
+
+```code
+$ tctl create --force cluster.yaml
+```
+
+### Remove a leaf cluster relationship from both sides
+
+Once established, to fully remove a trust relationship between two clusters, do
+the following:
+
+- Remove the relationship from the leaf cluster: `tctl rm tc/root.example.com` (`tc` = Trusted Cluster)
+- Remove the relationship from the root cluster: `tctl rm rc/leaf.example.com` (`rc` = remote cluster)
+
+### Remove a leaf cluster relationship from the root
+
+Remove the relationship from the root cluster: `tctl rm rc/leaf.example.com`.
+
+<Admonition type="note">
+  The `leaf.example.com` cluster will continue to try and ping the root cluster,
+  but will not be able to connect. To re-establish the Trusted Cluster relationship,
+  the Trusted Cluster has to be created again from the leaf cluster.
+</Admonition>
+
+### Remove a leaf cluster relationship from the leaf
+
+Remove the relationship from the leaf cluster: `tctl rm tc/root.example.com`.
 
 ## Troubleshooting
 

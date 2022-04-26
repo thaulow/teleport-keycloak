@@ -25,18 +25,34 @@ This guide will explain how to:
 
 Teleport can partition compute infrastructure into multiple clusters. A cluster
 is a group of Teleport resources connected to the cluster's Auth Service, which
-acts as a certificate authority (CA) for all users and nodes in the cluster.
+acts as a certificate authority (CA) for all users and Nodes in the cluster.
 
-To retrieve an SSH certificate, users must authenticate with a cluster through a
-Proxy Service. If users want to connect to Nodes belonging to different
-clusters, they would normally have to use different `--proxy` flags for each
-cluster. This is not always convenient.
+Trusted Clusters allow the users of one cluster, the **root cluster**, to
+seamlessly SSH into the Nodes of another cluster, the **leaf cluster**, while
+remaining authenticated with only a single Proxy Service. Users do not need to
+have a direct connection to other clusters' Proxy Service.
+
+## Prerequisites
+
+(!docs/pages/includes/edition-prereqs-tabs.mdx!)
+
+- Launch a second Teleport cluster in order to follow this guide. 
+
+  We will call this cluster the **leaf cluster**. The cluster you typically use
+  to follow guides will be called the **root cluster**. We will show you how to
+  establish trust between the leaf cluster and the root cluster via Trusted
+  Clusters.
+
+- A host that is running a Teleport Node. See [Adding
+  Nodes](../adding-nodes.mdx) for how to launch a Teleport Node in your cluster.
+  
+  This Node must be joined to the leaf cluster. If you launched your leaf
+  cluster by following
+  [Getting Started on a Linux Server](../../getting-started/linux-server.mdx),
+  this step will already be complete.
 
 **Leaf clusters** allow Teleport administrators to connect multiple clusters and
-establish trust between them. Trusted Clusters allow users of one cluster, the
-**root cluster**, to seamlessly SSH into the Nodes of another cluster without having
-to "hop" between proxy servers. Moreover, users don't even need to have a direct
-connection to other clusters' Proxy Service.
+establish trust between them. 
 
 (!docs/pages/includes/permission-warning.mdx!)
 

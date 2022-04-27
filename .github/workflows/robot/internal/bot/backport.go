@@ -151,16 +151,13 @@ func (b *Bot) createBackportBranch(ctx context.Context, organization string, rep
 		log.Printf("Failed to set user.email: %v.", err)
 	}
 
-	// Fetch base and head branches and create new backport branch that tracks
-	// the branch the Pull Request will be backported to.
+	// Download base and head from origin (GitHub).
 	if err := git("fetch", "origin", base, head); err != nil {
 		return trace.Wrap(err)
 	}
-	if err := git("checkout", "-b", newHead, "--track", fmt.Sprintf("origin/%v", base)); err != nil {
-		return trace.Wrap(err)
-	}
 
-	// Get list of commits to backport and cherry-pick to backport branch.
+	// Get list of commits in Pull Request. This will be used to build range of
+	// commits to backport.
 	commits, err := b.c.GitHub.ListCommits(ctx,
 		organization,
 		repository,
@@ -168,16 +165,26 @@ func (b *Bot) createBackportBranch(ctx context.Context, organization string, rep
 	if err != nil {
 		return trace.Wrap(err)
 	}
-	for _, commit := range commits {
-		if err := git("cherry-pick", commit); err != nil {
-			if er := git("cherry-pick", "--abort"); er != nil {
-				return trace.NewAggregate(err, er)
-			}
-			return trace.BadParameter("failed to cherry-pick %v", commit)
+
+	// Checkout the base branch then rebase commits from Pull Request ontop of
+	// it. See https://stackoverflow.com/a/29916361 for more details.
+	oldParent := fmt.Sprintf("%v~1", commits[0])
+	newParent := base
+	until := commits[len(commits)-1]
+	if err := git("checkout", base); err != nil {
+		return trace.Wrap(err)
+	}
+	if err := git("rebase", "--onto", newParent, oldParent, until); err != nil {
+		if er := git("rebase", "--abort"); err != nil {
+			log.Printf("err: %v, er: %v", err, er)
+			return trace.BadParameter("rebase failed")
 		}
 	}
 
-	// Push branch to origin (GitHub).
+	// Checkout and push a branch to origin (GitHub).
+	if err := git("checkout", "-b", newHead); err != nil {
+		return trace.Wrap(err)
+	}
 	if err := git("push", "origin", newHead); err != nil {
 		return trace.Wrap(err)
 	}
@@ -211,7 +218,7 @@ func git(args ...string) error {
 	cmd := exec.Command("git", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return trace.BadParameter(string(out))
+		return trace.BadParameter(string(bytes.TrimSpace(out)))
 	}
 	return nil
 }

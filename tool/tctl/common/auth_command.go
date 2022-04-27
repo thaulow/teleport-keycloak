@@ -1,882 +1,1367 @@
-// Copyright 2021 Gravitational, Inc
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//      http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+Copyright 2015-2021 Gravitational, Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 
 package common
 
 import (
 	"context"
-	"crypto/x509/pkix"
-	"encoding/pem"
 	"fmt"
-	"net"
-	"net/url"
+	"io"
 	"os"
-	"strconv"
-	"strings"
-	"text/template"
 	"time"
 
-	"github.com/gravitational/teleport/api/client/proto"
+	"github.com/gravitational/teleport"
 	apidefaults "github.com/gravitational/teleport/api/defaults"
 	"github.com/gravitational/teleport/api/types"
+	apiutils "github.com/gravitational/teleport/api/utils"
 	"github.com/gravitational/teleport/lib/auth"
-	"github.com/gravitational/teleport/lib/auth/native"
 	"github.com/gravitational/teleport/lib/client"
-	"github.com/gravitational/teleport/lib/client/identityfile"
 	"github.com/gravitational/teleport/lib/defaults"
-	kubeutils "github.com/gravitational/teleport/lib/kube/utils"
 	"github.com/gravitational/teleport/lib/service"
 	"github.com/gravitational/teleport/lib/services"
-	"github.com/gravitational/teleport/lib/sshutils"
-	"github.com/gravitational/teleport/lib/tlsca"
 	"github.com/gravitational/teleport/lib/utils"
 
 	"github.com/gravitational/kingpin"
 	"github.com/gravitational/trace"
-	"github.com/sirupsen/logrus"
-	log "github.com/sirupsen/logrus"
+	kyaml "k8s.io/apimachinery/pkg/util/yaml"
 )
 
-// AuthCommand implements `tctl auth` group of commands
-type AuthCommand struct {
-	config                     *service.Config
-	authType                   string
-	genPubPath                 string
-	genPrivPath                string
-	genUser                    string
-	genHost                    string
-	genTTL                     time.Duration
-	exportAuthorityFingerprint string
-	exportPrivateKeys          bool
-	output                     string
-	outputFormat               identityfile.Format
-	compatVersion              string
-	compatibility              string
-	proxyAddr                  string
-	leafCluster                string
-	kubeCluster                string
-	appName                    string
-	dbService                  string
-	dbName                     string
-	dbUser                     string
-	signOverwrite              bool
+// ResourceCreateHandler is the generic implementation of a resource creation handler
+type ResourceCreateHandler func(auth.ClientI, services.UnknownResource) error
 
-	rotateGracePeriod time.Duration
-	rotateType        string
-	rotateManualMode  bool
-	rotateTargetPhase string
+// ResourceKind is the string form of a resource, i.e. "oidc"
+type ResourceKind string
 
-	authGenerate *kingpin.CmdClause
-	authExport   *kingpin.CmdClause
-	authSign     *kingpin.CmdClause
-	authRotate   *kingpin.CmdClause
+// ResourceCommand implements `tctl get/create/list` commands for manipulating
+// Teleport resources
+type ResourceCommand struct {
+	config      *service.Config
+	ref         services.Ref
+	refs        services.Refs
+	format      string
+	namespace   string
+	withSecrets bool
+	force       bool
+	confirm     bool
+	ttl         string
+	labels      string
+
+	// filename is the name of the resource, used for 'create'
+	filename string
+
+	// CLI subcommands:
+	deleteCmd *kingpin.CmdClause
+	getCmd    *kingpin.CmdClause
+	createCmd *kingpin.CmdClause
+	updateCmd *kingpin.CmdClause
+
+	verbose bool
+
+	CreateHandlers map[ResourceKind]ResourceCreateHandler
+
+	// stdout allows to switch standard output source for resource command. Used in tests.
+	stdout io.Writer
 }
 
-// Initialize allows TokenCommand to plug itself into the CLI parser
-func (a *AuthCommand) Initialize(app *kingpin.Application, config *service.Config) {
-	a.config = config
+const getHelp = `Examples:
 
-	// operations with authorities
-	auth := app.Command("auth", "Operations with user and host certificate authorities (CAs)").Hidden()
-	a.authExport = auth.Command("export", "Export public cluster (CA) keys to stdout")
-	a.authExport.Flag("keys", "if set, will print private keys").BoolVar(&a.exportPrivateKeys)
-	a.authExport.Flag("fingerprint", "filter authority by fingerprint").StringVar(&a.exportAuthorityFingerprint)
-	a.authExport.Flag("compat", "export certificates compatible with specific version of Teleport").StringVar(&a.compatVersion)
-	a.authExport.Flag("type", "export certificate type").EnumVar(&a.authType, allowedCertificateTypes...)
+  $ tctl get clusters       : prints the list of all trusted clusters
+  $ tctl get cluster/east   : prints the trusted cluster 'east'
+  $ tctl get clusters,users : prints all trusted clusters and all users
 
-	a.authGenerate = auth.Command("gen", "Generate a new SSH keypair").Hidden()
-	a.authGenerate.Flag("pub-key", "path to the public key").Required().StringVar(&a.genPubPath)
-	a.authGenerate.Flag("priv-key", "path to the private key").Required().StringVar(&a.genPrivPath)
+Same as above, but using JSON output:
 
-	a.authSign = auth.Command("sign", "Create an identity file(s) for a given user")
-	a.authSign.Flag("user", "Teleport user name").StringVar(&a.genUser)
-	a.authSign.Flag("host", "Teleport host name").StringVar(&a.genHost)
-	a.authSign.Flag("out", "Identity output").Short('o').Required().StringVar(&a.output)
-	a.authSign.Flag("format", fmt.Sprintf("Identity format: %s. %s is the default.",
-		identityfile.KnownFileFormats.String(), identityfile.DefaultFormat)).
-		Default(string(identityfile.DefaultFormat)).
-		StringVar((*string)(&a.outputFormat))
-	a.authSign.Flag("ttl", "TTL (time to live) for the generated certificate").
-		Default(fmt.Sprintf("%v", apidefaults.CertDuration)).
-		DurationVar(&a.genTTL)
-	a.authSign.Flag("compat", "OpenSSH compatibility flag").StringVar(&a.compatibility)
-	a.authSign.Flag("proxy", `Address of the teleport proxy. When --format is set to "kubernetes", this address will be set as cluster address in the generated kubeconfig file`).StringVar(&a.proxyAddr)
-	a.authSign.Flag("overwrite", "Whether to overwrite existing destination files. When not set, user will be prompted before overwriting any existing file.").BoolVar(&a.signOverwrite)
-	// --kube-cluster was an unfortunately chosen flag name, before teleport
-	// supported kubernetes_service and registered kubernetes clusters that are
-	// not trusted teleport clusters.
-	// It's kept as an alias for --leaf-cluster for backwards-compatibility,
-	// but hidden.
-	a.authSign.Flag("kube-cluster", `Leaf cluster to generate identity file for when --format is set to "kubernetes"`).Hidden().StringVar(&a.leafCluster)
-	a.authSign.Flag("leaf-cluster", `Leaf cluster to generate identity file for when --format is set to "kubernetes"`).StringVar(&a.leafCluster)
-	a.authSign.Flag("kube-cluster-name", `Kubernetes cluster to generate identity file for when --format is set to "kubernetes"`).StringVar(&a.kubeCluster)
-	a.authSign.Flag("app-name", `Application to generate identity file for. Mutually exclusive with "--db-service".`).StringVar(&a.appName)
-	a.authSign.Flag("db-service", `Database to generate identity file for. Mutually exclusive with "--app-name".`).StringVar(&a.dbService)
-	a.authSign.Flag("db-user", `Database user placed on the identity file. Only used when "--db-service" is set.`).StringVar(&a.dbUser)
-	a.authSign.Flag("db-name", `Database name placed on the identity file. Only used when "--db-service" is set.`).StringVar(&a.dbName)
+  $ tctl get clusters --format=json
+`
 
-	a.authRotate = auth.Command("rotate", "Rotate certificate authorities in the cluster")
-	a.authRotate.Flag("grace-period", "Grace period keeps previous certificate authorities signatures valid, if set to 0 will force users to re-login and nodes to re-register.").
-		Default(fmt.Sprintf("%v", defaults.RotationGracePeriod)).
-		DurationVar(&a.rotateGracePeriod)
-	a.authRotate.Flag("manual", "Activate manual rotation , set rotation phases manually").BoolVar(&a.rotateManualMode)
-	a.authRotate.Flag("type", "Certificate authority to rotate, rotates host, user and database CA by default").StringVar(&a.rotateType)
-	a.authRotate.Flag("phase", fmt.Sprintf("Target rotation phase to set, used in manual rotation, one of: %v", strings.Join(types.RotatePhases, ", "))).StringVar(&a.rotateTargetPhase)
+// Initialize allows ResourceCommand to plug itself into the CLI parser
+func (rc *ResourceCommand) Initialize(app *kingpin.Application, config *service.Config) {
+	rc.CreateHandlers = map[ResourceKind]ResourceCreateHandler{
+		types.KindUser:                    rc.createUser,
+		types.KindRole:                    rc.createRole,
+		types.KindTrustedCluster:          rc.createTrustedCluster,
+		types.KindGithubConnector:         rc.createGithubConnector,
+		"oidc":                            rc.createKeycloakConnector,
+		types.KindCertAuthority:           rc.createCertAuthority,
+		types.KindClusterAuthPreference:   rc.createAuthPreference,
+		types.KindClusterNetworkingConfig: rc.createClusterNetworkingConfig,
+		types.KindSessionRecordingConfig:  rc.createSessionRecordingConfig,
+		types.KindLock:                    rc.createLock,
+		types.KindNetworkRestrictions:     rc.createNetworkRestrictions,
+		types.KindApp:                     rc.createApp,
+		types.KindDatabase:                rc.createDatabase,
+		types.KindToken:                   rc.createToken,
+	}
+	rc.config = config
+
+	rc.createCmd = app.Command("create", "Create or update a Teleport resource from a YAML file")
+	rc.createCmd.Arg("filename", "resource definition file, empty for stdin").StringVar(&rc.filename)
+	rc.createCmd.Flag("force", "Overwrite the resource if already exists").Short('f').BoolVar(&rc.force)
+	rc.createCmd.Flag("confirm", "Confirm an unsafe or temporary resource update").Hidden().BoolVar(&rc.confirm)
+
+	rc.updateCmd = app.Command("update", "Update resource fields")
+	rc.updateCmd.Arg("resource type/resource name", `Resource to update
+	<resource type>  Type of a resource [for example: rc]
+	<resource name>  Resource name to update
+
+	Examples:
+	$ tctl update rc/remote`).SetValue(&rc.ref)
+	rc.updateCmd.Flag("set-labels", "Set labels").StringVar(&rc.labels)
+	rc.updateCmd.Flag("set-ttl", "Set TTL").StringVar(&rc.ttl)
+
+	rc.deleteCmd = app.Command("rm", "Delete a resource").Alias("del")
+	rc.deleteCmd.Arg("resource type/resource name", `Resource to delete
+	<resource type>  Type of a resource [for example: connector,user,cluster,token]
+	<resource name>  Resource name to delete
+
+	Examples:
+	$ tctl rm connector/github
+	$ tctl rm cluster/main`).SetValue(&rc.ref)
+
+	rc.getCmd = app.Command("get", "Print a YAML declaration of various Teleport resources")
+	rc.getCmd.Arg("resources", "Resource spec: 'type/[name][,...]' or 'all'").Required().SetValue(&rc.refs)
+	rc.getCmd.Flag("format", "Output format: 'yaml', 'json' or 'text'").Default(teleport.YAML).StringVar(&rc.format)
+	rc.getCmd.Flag("namespace", "Namespace of the resources").Hidden().Default(apidefaults.Namespace).StringVar(&rc.namespace)
+	rc.getCmd.Flag("with-secrets", "Include secrets in resources like certificate authorities or OIDC connectors").Default("false").BoolVar(&rc.withSecrets)
+	rc.getCmd.Flag("verbose", "Verbose table output, shows full label output").Short('v').BoolVar(&rc.verbose)
+
+	rc.getCmd.Alias(getHelp)
+
+	if rc.stdout == nil {
+		rc.stdout = os.Stdout
+	}
 }
 
 // TryRun takes the CLI command as an argument (like "auth gen") and executes it
 // or returns match=false if 'cmd' does not belong to it
-func (a *AuthCommand) TryRun(cmd string, client auth.ClientI) (match bool, err error) {
-	ctx := context.Background()
+func (rc *ResourceCommand) TryRun(cmd string, client auth.ClientI) (match bool, err error) {
 	switch cmd {
-	case a.authGenerate.FullCommand():
-		err = a.GenerateKeys(ctx)
-	case a.authExport.FullCommand():
-		err = a.ExportAuthorities(ctx, client)
-	case a.authSign.FullCommand():
-		err = a.GenerateAndSignKeys(ctx, client)
-	case a.authRotate.FullCommand():
-		err = a.RotateCertAuthority(ctx, client)
+	// tctl get
+	case rc.getCmd.FullCommand():
+		err = rc.Get(client)
+		// tctl create
+	case rc.createCmd.FullCommand():
+		err = rc.Create(client)
+		// tctl rm
+	case rc.deleteCmd.FullCommand():
+		err = rc.Delete(client)
+		// tctl update
+	case rc.updateCmd.FullCommand():
+		err = rc.Update(client)
 	default:
 		return false, nil
 	}
 	return true, trace.Wrap(err)
 }
 
-var allowedCertificateTypes = []string{"user", "host", "tls-host", "tls-user", "tls-user-der", "windows", "db"}
+// IsDeleteSubcommand returns 'true' if the given command is `tctl rm`
+func (rc *ResourceCommand) IsDeleteSubcommand(cmd string) bool {
+	return cmd == rc.deleteCmd.FullCommand()
+}
 
-// ExportAuthorities outputs the list of authorities in OpenSSH compatible formats
-// If --type flag is given, only prints keys for CAs of this type, otherwise
-// prints all keys
-func (a *AuthCommand) ExportAuthorities(ctx context.Context, client auth.ClientI) error {
-	var typesToExport []types.CertAuthType
+// GetRef returns the reference (basically type/name pair) of the resource
+// the command is operating on
+func (rc *ResourceCommand) GetRef() services.Ref {
+	return rc.ref
+}
 
-	// this means to export TLS authority
-	switch a.authType {
-	// "tls" is supported for backwards compatibility.
-	// "tls-host" and "tls-user" were added later to allow export of the user
-	// TLS CA.
-	case "tls", "tls-host":
-		return a.exportTLSAuthority(ctx, client, types.HostCA, false)
-	case "tls-user":
-		return a.exportTLSAuthority(ctx, client, types.UserCA, false)
-	case "db":
-		return a.exportTLSAuthority(ctx, client, types.DatabaseCA, false)
-	case "tls-user-der", "windows":
-		return a.exportTLSAuthority(ctx, client, types.UserCA, true)
+// Get prints one or many resources of a certain type
+func (rc *ResourceCommand) Get(client auth.ClientI) error {
+	if rc.refs.IsAll() {
+		return rc.GetAll(client)
 	}
-
-	// if no --type flag is given, export all types
-	if a.authType == "" {
-		typesToExport = []types.CertAuthType{types.HostCA, types.UserCA, types.DatabaseCA}
-	} else {
-		authType := types.CertAuthType(a.authType)
-		if err := authType.Check(); err != nil {
-			return trace.Wrap(err)
-		}
-		typesToExport = []types.CertAuthType{authType}
+	if len(rc.refs) != 1 {
+		return rc.GetMany(client)
 	}
-	localAuthName, err := client.GetDomainName()
+	rc.ref = rc.refs[0]
+	collection, err := rc.getCollection(client)
 	if err != nil {
 		return trace.Wrap(err)
 	}
 
-	// fetch authorities via auth API (and only take local CAs, ignoring
-	// trusted ones)
-	var authorities []types.CertAuthority
-	for _, at := range typesToExport {
-		cas, err := client.GetCertAuthorities(ctx, at, a.exportPrivateKeys)
+	// Note that only YAML is officially supported. Support for text and JSON
+	// is experimental.
+	switch rc.format {
+	case teleport.Text:
+		return collection.writeText(rc.stdout)
+	case teleport.YAML:
+		return writeYAML(collection, rc.stdout)
+	case teleport.JSON:
+		return writeJSON(collection, rc.stdout)
+	}
+	return trace.BadParameter("unsupported format")
+}
+
+func (rc *ResourceCommand) GetMany(client auth.ClientI) error {
+	if rc.format != teleport.YAML {
+		return trace.BadParameter("mixed resource types only support YAML formatting")
+	}
+	var resources []types.Resource
+	for _, ref := range rc.refs {
+		rc.ref = ref
+		collection, err := rc.getCollection(client)
 		if err != nil {
 			return trace.Wrap(err)
 		}
-		for _, ca := range cas {
-			if ca.GetClusterName() == localAuthName {
-				authorities = append(authorities, ca)
+		resources = append(resources, collection.resources()...)
+	}
+	if err := utils.WriteYAML(os.Stdout, resources); err != nil {
+		return trace.Wrap(err)
+	}
+	return nil
+}
+
+func (rc *ResourceCommand) GetAll(client auth.ClientI) error {
+	rc.withSecrets = true
+	allKinds := services.GetResourceMarshalerKinds()
+	allRefs := make([]services.Ref, 0, len(allKinds))
+	for _, kind := range allKinds {
+		ref := services.Ref{
+			Kind: kind,
+		}
+		allRefs = append(allRefs, ref)
+	}
+	rc.refs = services.Refs(allRefs)
+	return rc.GetMany(client)
+}
+
+// Create updates or inserts one or many resources
+func (rc *ResourceCommand) Create(client auth.ClientI) (err error) {
+	var reader io.Reader
+	if rc.filename == "" {
+		reader = os.Stdin
+	} else {
+		f, err := utils.OpenFile(rc.filename)
+		if err != nil {
+			return trace.Wrap(err)
+		}
+		defer f.Close()
+		reader = f
+	}
+	decoder := kyaml.NewYAMLOrJSONDecoder(reader, defaults.LookaheadBufSize)
+	count := 0
+	for {
+		var raw services.UnknownResource
+		err := decoder.Decode(&raw)
+		if err != nil {
+			if err == io.EOF {
+				if count == 0 {
+					return trace.BadParameter("no resources found, empty input?")
+				}
+				return nil
 			}
+			return trace.Wrap(err)
 		}
-	}
+		count++
 
-	// print:
-	for _, ca := range authorities {
-		if a.exportPrivateKeys {
-			for _, key := range ca.GetActiveKeys().SSH {
-				fingerprint, err := sshutils.PrivateKeyFingerprint(key.PrivateKey)
-				if err != nil {
-					return trace.Wrap(err)
-				}
-				if a.exportAuthorityFingerprint != "" && fingerprint != a.exportAuthorityFingerprint {
-					continue
-				}
-				os.Stdout.Write(key.PrivateKey)
-				fmt.Fprintf(os.Stdout, "\n")
+		// locate the creator function for a given resource kind:
+		creator, found := rc.CreateHandlers[ResourceKind(raw.Kind)]
+		if !found {
+			// if we're trying to create an OIDC/SAML connector with the OSS version of tctl, return a specific error
+			if raw.Kind == "oidc" || raw.Kind == "saml" {
+				return trace.BadParameter("creating resources of type %q is only supported in Teleport Enterprise. If you connecting to a Teleport Enterprise Cluster you must install the enterprise version of tctl. https://goteleport.com/teleport/docs/enterprise/", raw.Kind)
 			}
-		} else {
-			for _, key := range ca.GetTrustedSSHKeyPairs() {
-				fingerprint, err := sshutils.AuthorizedKeyFingerprint(key.PublicKey)
-				if err != nil {
-					return trace.Wrap(err)
-				}
-				if a.exportAuthorityFingerprint != "" && fingerprint != a.exportAuthorityFingerprint {
-					continue
-				}
-
-				// export certificates in the old 1.0 format where host and user
-				// certificate authorities were exported in the known_hosts format.
-				if a.compatVersion == "1.0" {
-					castr, err := hostCAFormat(ca, key.PublicKey, client)
-					if err != nil {
-						return trace.Wrap(err)
-					}
-
-					fmt.Println(castr)
-					continue
-				}
-
-				// export certificate authority in user or host ca format
-				var castr string
-				switch ca.GetType() {
-				case types.UserCA:
-					castr, err = userCAFormat(ca, key.PublicKey)
-				case types.HostCA:
-					castr, err = hostCAFormat(ca, key.PublicKey, client)
-				default:
-					return trace.BadParameter("unknown user type: %q", ca.GetType())
-				}
-				if err != nil {
-					return trace.Wrap(err)
-				}
-
-				// print the export friendly string
-				fmt.Println(castr)
+			return trace.BadParameter("creating resources of type %q is not supported", raw.Kind)
+		}
+		// only return in case of error, to create multiple resources
+		// in case if yaml spec is a list
+		if err := creator(client, raw); err != nil {
+			if trace.IsAlreadyExists(err) {
+				return trace.Wrap(err, "use -f or --force flag to overwrite")
 			}
-		}
-	}
-	return nil
-}
-
-func (a *AuthCommand) exportTLSAuthority(ctx context.Context, client auth.ClientI, typ types.CertAuthType, unpackPEM bool) error {
-	clusterName, err := client.GetDomainName()
-	if err != nil {
-		return trace.Wrap(err)
-	}
-	certAuthority, err := client.GetCertAuthority(
-		ctx,
-		types.CertAuthID{Type: typ, DomainName: clusterName},
-		a.exportPrivateKeys,
-	)
-	if err != nil {
-		return trace.Wrap(err)
-	}
-	if len(certAuthority.GetActiveKeys().TLS) != 1 {
-		return trace.BadParameter("expected one TLS key pair, got %v", len(certAuthority.GetActiveKeys().TLS))
-	}
-	keyPair := certAuthority.GetActiveKeys().TLS[0]
-
-	print := func(data []byte) error {
-		if !unpackPEM {
-			fmt.Println(string(data))
-			return nil
-		}
-		b, _ := pem.Decode(data)
-		if b == nil {
-			return trace.BadParameter("no PEM data in CA data: %q", data)
-		}
-		fmt.Println(string(b.Bytes))
-		return nil
-	}
-	if a.exportPrivateKeys {
-		if err := print(keyPair.Key); err != nil {
 			return trace.Wrap(err)
 		}
 	}
-	return trace.Wrap(print(keyPair.Cert))
 }
 
-// GenerateKeys generates a new keypair
-func (a *AuthCommand) GenerateKeys(ctx context.Context) error {
-	keygen := native.New(ctx)
-	defer keygen.Close()
-	privBytes, pubBytes, err := keygen.GenerateKeyPair()
-	if err != nil {
-		return trace.Wrap(err)
-	}
-	err = os.WriteFile(a.genPubPath, pubBytes, 0600)
+// createTrustedCluster implements `tctl create cluster.yaml` command
+func (rc *ResourceCommand) createTrustedCluster(client auth.ClientI, raw services.UnknownResource) error {
+	ctx := context.TODO()
+	tc, err := services.UnmarshalTrustedCluster(raw.Raw)
 	if err != nil {
 		return trace.Wrap(err)
 	}
 
-	err = os.WriteFile(a.genPrivPath, privBytes, 0600)
-	if err != nil {
-		return trace.Wrap(err)
-	}
-
-	fmt.Printf("wrote public key to: %v and private key to: %v\n", a.genPubPath, a.genPrivPath)
-	return nil
-}
-
-// GenerateAndSignKeys generates a new keypair and signs it for role
-func (a *AuthCommand) GenerateAndSignKeys(ctx context.Context, clusterAPI auth.ClientI) error {
-	switch a.outputFormat {
-	case identityfile.FormatDatabase, identityfile.FormatMongo, identityfile.FormatCockroach, identityfile.FormatRedis:
-		return a.generateDatabaseKeys(ctx, clusterAPI)
-	}
-	switch {
-	case a.genUser != "" && a.genHost == "":
-		return a.generateUserKeys(ctx, clusterAPI)
-	case a.genUser == "" && a.genHost != "":
-		return a.generateHostKeys(ctx, clusterAPI)
-	default:
-		return trace.BadParameter("--user or --host must be specified")
-	}
-}
-
-// RotateCertAuthority starts or restarts certificate authority rotation process
-func (a *AuthCommand) RotateCertAuthority(ctx context.Context, client auth.ClientI) error {
-	req := auth.RotateRequest{
-		Type:        types.CertAuthType(a.rotateType),
-		GracePeriod: &a.rotateGracePeriod,
-		TargetPhase: a.rotateTargetPhase,
-	}
-	if a.rotateManualMode {
-		req.Mode = types.RotationModeManual
-	} else {
-		req.Mode = types.RotationModeAuto
-	}
-	if err := client.RotateCertAuthority(ctx, req); err != nil {
-		return err
-	}
-	if a.rotateTargetPhase != "" {
-		fmt.Printf("Updated rotation phase to %q. To check status use 'tctl status'\n", a.rotateTargetPhase)
-	} else {
-		fmt.Printf("Initiated certificate authority rotation. To check status use 'tctl status'\n")
-	}
-
-	return nil
-}
-
-func (a *AuthCommand) generateHostKeys(ctx context.Context, clusterAPI auth.ClientI) error {
-	// only format=openssh is supported
-	if a.outputFormat != identityfile.FormatOpenSSH {
-		return trace.BadParameter("invalid --format flag %q, only %q is supported", a.outputFormat, identityfile.FormatOpenSSH)
-	}
-
-	// split up comma separated list
-	principals := strings.Split(a.genHost, ",")
-
-	// generate a keypair
-	key, err := client.NewKey()
-	if err != nil {
-		return trace.Wrap(err)
-	}
-
-	cn, err := clusterAPI.GetClusterName()
-	if err != nil {
-		return trace.Wrap(err)
-	}
-	clusterName := cn.GetClusterName()
-
-	key.Cert, err = clusterAPI.GenerateHostCert(key.Pub,
-		"", "", principals,
-		clusterName, types.RoleNode, 0)
-	if err != nil {
-		return trace.Wrap(err)
-	}
-	hostCAs, err := clusterAPI.GetCertAuthorities(ctx, types.HostCA, false)
-	if err != nil {
-		return trace.Wrap(err)
-	}
-	key.TrustedCA = auth.AuthoritiesToTrustedCerts(hostCAs)
-
-	// if no name was given, take the first name on the list of principals
-	filePath := a.output
-	if filePath == "" {
-		filePath = principals[0]
-	}
-
-	filesWritten, err := identityfile.Write(identityfile.WriteConfig{
-		OutputPath:           filePath,
-		Key:                  key,
-		Format:               a.outputFormat,
-		OverwriteDestination: a.signOverwrite,
-	})
-	if err != nil {
-		return trace.Wrap(err)
-	}
-	fmt.Printf("\nThe credentials have been written to %s\n", strings.Join(filesWritten, ", "))
-	return nil
-}
-
-// generateDatabaseKeys generates a new unsigned key and signs it with Teleport
-// CA for database access.
-func (a *AuthCommand) generateDatabaseKeys(ctx context.Context, clusterAPI auth.ClientI) error {
-	key, err := client.NewKey()
-	if err != nil {
-		return trace.Wrap(err)
-	}
-	return a.generateDatabaseKeysForKey(ctx, clusterAPI, key)
-}
-
-// generateDatabaseKeysForKey signs the provided unsigned key with Teleport CA
-// for database access.
-func (a *AuthCommand) generateDatabaseKeysForKey(ctx context.Context, clusterAPI auth.ClientI, key *client.Key) error {
-	principals := strings.Split(a.genHost, ",")
-	if len(principals) == 1 && principals[0] == "" {
-		return trace.BadParameter("at least one hostname must be specified via --host flag")
-	}
-	// For CockroachDB node certificates, CommonName must be "node":
-	//
-	// https://www.cockroachlabs.com/docs/v21.1/cockroach-cert#node-key-and-certificates
-	if a.outputFormat == identityfile.FormatCockroach {
-		principals = append([]string{"node"}, principals...)
-	}
-	subject := pkix.Name{CommonName: principals[0]}
-	if a.outputFormat == identityfile.FormatMongo {
-		// Include Organization attribute in MongoDB certificates as well.
-		//
-		// When using X.509 member authentication, MongoDB requires O or OU to
-		// be non-empty so this will make the certs we generate compatible:
-		//
-		// https://docs.mongodb.com/manual/core/security-internal-authentication/#x.509
-		//
-		// The actual O value doesn't matter as long as it matches on all
-		// MongoDB cluster members so set it to the Teleport cluster name
-		// to avoid hardcoding anything.
-		clusterName, err := clusterAPI.GetClusterName()
-		if err != nil {
-			return trace.Wrap(err)
-		}
-		subject.Organization = []string{
-			clusterName.GetClusterName(),
-		}
-	}
-	csr, err := tlsca.GenerateCertificateRequestPEM(subject, key.Priv)
-	if err != nil {
-		return trace.Wrap(err)
-	}
-	resp, err := clusterAPI.GenerateDatabaseCert(ctx,
-		&proto.DatabaseCertRequest{
-			CSR: csr,
-			// Important to include SANs since CommonName has been deprecated
-			// since Go 1.15:
-			//   https://golang.org/doc/go1.15#commonname
-			ServerNames: principals,
-			// Include legacy ServerName for compatibility.
-			ServerName: principals[0],
-			TTL:        proto.Duration(a.genTTL),
-		})
-	if err != nil {
-		return trace.Wrap(err)
-	}
-	key.TLSCert = resp.Cert
-	key.TrustedCA = []auth.TrustedCerts{{TLSCertificates: resp.CACerts}}
-	filesWritten, err := identityfile.Write(identityfile.WriteConfig{
-		OutputPath:           a.output,
-		Key:                  key,
-		Format:               a.outputFormat,
-		OverwriteDestination: a.signOverwrite,
-	})
-	if err != nil {
-		return trace.Wrap(err)
-	}
-	switch a.outputFormat {
-	case identityfile.FormatDatabase:
-		dbAuthSignTpl.Execute(os.Stdout, map[string]interface{}{
-			"files":  strings.Join(filesWritten, ", "),
-			"output": a.output,
-		})
-	case identityfile.FormatMongo:
-		mongoAuthSignTpl.Execute(os.Stdout, map[string]interface{}{
-			"files":  strings.Join(filesWritten, ", "),
-			"output": a.output,
-		})
-	case identityfile.FormatCockroach:
-		cockroachAuthSignTpl.Execute(os.Stdout, map[string]interface{}{
-			"files":  strings.Join(filesWritten, ", "),
-			"output": a.output,
-		})
-	case identityfile.FormatRedis:
-		redisAuthSignTpl.Execute(os.Stdout, map[string]interface{}{
-			"files":  strings.Join(filesWritten, ", "),
-			"output": a.output,
-		})
-	}
-	return nil
-}
-
-var (
-	// dbAuthSignTpl is printed when user generates credentials for a self-hosted database.
-	dbAuthSignTpl = template.Must(template.New("").Parse(`Database credentials have been written to {{.files}}.
-
-To enable mutual TLS on your PostgreSQL server, add the following to its
-postgresql.conf configuration file:
-
-ssl = on
-ssl_cert_file = '/path/to/{{.output}}.crt'
-ssl_key_file = '/path/to/{{.output}}.key'
-ssl_ca_file = '/path/to/{{.output}}.cas'
-
-To enable mutual TLS on your MySQL server, add the following to its
-mysql.cnf configuration file:
-
-[mysqld]
-require_secure_transport=ON
-ssl-cert=/path/to/{{.output}}.crt
-ssl-key=/path/to/{{.output}}.key
-ssl-ca=/path/to/{{.output}}.cas
-`))
-	// mongoAuthSignTpl is printed when user generates credentials for a MongoDB database.
-	mongoAuthSignTpl = template.Must(template.New("").Parse(`Database credentials have been written to {{.files}}.
-
-To enable mutual TLS on your MongoDB server, add the following to its
-mongod.yaml configuration file:
-
-net:
-  tls:
-    mode: requireTLS
-    certificateKeyFile: /path/to/{{.output}}.crt
-    CAFile: /path/to/{{.output}}.cas
-`))
-	cockroachAuthSignTpl = template.Must(template.New("").Parse(`Database credentials have been written to {{.files}}.
-
-To enable mutual TLS on your CockroachDB server, point it to the certs
-directory using --certs-dir flag:
-
-cockroach start \
-  --certs-dir={{.output}} \
-  # other flags...
-`))
-
-	redisAuthSignTpl = template.Must(template.New("").Parse(`Database credentials have been written to {{.files}}.
-
-To enable mutual TLS on your Redis server, add the following to your redis.conf:
-
-tls-ca-cert-file /path/to/{{.output}}.cas
-tls-cert-file /path/to/{{.output}}.crt
-tls-key-file /path/to/{{.output}}.key
-tls-protocols "TLSv1.2 TLSv1.3"
-`))
-)
-
-func (a *AuthCommand) generateUserKeys(ctx context.Context, clusterAPI auth.ClientI) error {
-	// Validate --proxy flag.
-	if err := a.checkProxyAddr(clusterAPI); err != nil {
-		return trace.Wrap(err)
-	}
-	// parse compatibility parameter
-	certificateFormat, err := utils.CheckCertificateFormatFlag(a.compatibility)
-	if err != nil {
-		return trace.Wrap(err)
-	}
-
-	// generate a keypair:
-	key, err := client.NewKey()
-	if err != nil {
-		return trace.Wrap(err)
-	}
-
-	if a.leafCluster != "" {
-		if err := a.checkLeafCluster(clusterAPI); err != nil {
-			return trace.Wrap(err)
-		}
-	} else {
-		cn, err := clusterAPI.GetClusterName()
-		if err != nil {
-			return trace.Wrap(err)
-		}
-		a.leafCluster = cn.GetClusterName()
-	}
-	key.ClusterName = a.leafCluster
-
-	if err := a.checkKubeCluster(ctx, clusterAPI); err != nil {
-		return trace.Wrap(err)
-	}
-
-	var (
-		routeToApp      proto.RouteToApp
-		routeToDatabase proto.RouteToDatabase
-		certUsage       proto.UserCertsRequest_CertUsage
-	)
-
-	// `appName` and `db` are mutually exclusive.
-	if a.appName != "" && a.dbService != "" {
-		return trace.BadParameter("only --app-name or --db-service can be set, not both")
-	}
-
-	switch {
-	case a.appName != "":
-		server, err := getApplicationServer(ctx, clusterAPI, a.appName)
-		if err != nil {
-			return trace.Wrap(err)
-		}
-
-		appSession, err := clusterAPI.CreateAppSession(ctx, types.CreateAppSessionRequest{
-			Username:    a.genUser,
-			PublicAddr:  server.GetApp().GetPublicAddr(),
-			ClusterName: a.leafCluster,
-		})
-		if err != nil {
-			return trace.Wrap(err)
-		}
-
-		routeToApp = proto.RouteToApp{
-			Name:        a.appName,
-			PublicAddr:  server.GetApp().GetPublicAddr(),
-			ClusterName: a.leafCluster,
-			SessionID:   appSession.GetName(),
-		}
-		certUsage = proto.UserCertsRequest_App
-	case a.dbService != "":
-		server, err := getDatabaseServer(context.TODO(), clusterAPI, a.dbService)
-		if err != nil {
-			return trace.Wrap(err)
-		}
-
-		routeToDatabase = proto.RouteToDatabase{
-			ServiceName: a.dbService,
-			Protocol:    server.GetDatabase().GetProtocol(),
-			Database:    a.dbName,
-			Username:    a.dbUser,
-		}
-		certUsage = proto.UserCertsRequest_Database
-	}
-
-	reqExpiry := time.Now().UTC().Add(a.genTTL)
-	// Request signed certs from `auth` server.
-	certs, err := clusterAPI.GenerateUserCerts(ctx, proto.UserCertsRequest{
-		PublicKey:         key.Pub,
-		Username:          a.genUser,
-		Expires:           reqExpiry,
-		Format:            certificateFormat,
-		RouteToCluster:    a.leafCluster,
-		KubernetesCluster: a.kubeCluster,
-		RouteToApp:        routeToApp,
-		Usage:             certUsage,
-		RouteToDatabase:   routeToDatabase,
-	})
-	if err != nil {
-		return trace.Wrap(err)
-	}
-	key.Cert = certs.SSH
-	key.TLSCert = certs.TLS
-
-	hostCAs, err := clusterAPI.GetCertAuthorities(ctx, types.HostCA, false)
-	if err != nil {
-		return trace.Wrap(err)
-	}
-	key.TrustedCA = auth.AuthoritiesToTrustedCerts(hostCAs)
-
-	// write the cert+private key to the output:
-	filesWritten, err := identityfile.Write(identityfile.WriteConfig{
-		OutputPath:           a.output,
-		Key:                  key,
-		Format:               a.outputFormat,
-		KubeProxyAddr:        a.proxyAddr,
-		OverwriteDestination: a.signOverwrite,
-	})
-	if err != nil {
-		return trace.Wrap(err)
-	}
-	fmt.Printf("\nThe credentials have been written to %s\n", strings.Join(filesWritten, ", "))
-
-	expires, err := key.TeleportTLSCertValidBefore()
-	if err != nil {
-		log.WithError(err).Warn("Failed to check TTL validity")
-		// err swallowed on purpose
-		return nil
-	}
-	if reqExpiry.Sub(expires) > time.Minute {
-		log.Warnf("Requested TTL of %s was not granted. User may have a role with a shorter max session TTL"+
-			" or an existing session ending before the requested TTL. Proceeding with %s",
-			a.genTTL,
-			time.Until(expires).Round(time.Second))
-	}
-
-	return nil
-}
-
-func (a *AuthCommand) checkLeafCluster(clusterAPI auth.ClientI) error {
-	if a.outputFormat != identityfile.FormatKubernetes && a.leafCluster != "" {
-		// User set --cluster but it's not actually used for the chosen --format.
-		// Print a warning but continue.
-		fmt.Printf("Note: --cluster is only used with --format=%q, ignoring for --format=%q\n", identityfile.FormatKubernetes, a.outputFormat)
-	}
-
-	if a.outputFormat != identityfile.FormatKubernetes {
-		return nil
-	}
-
-	clusters, err := clusterAPI.GetRemoteClusters()
-	if err != nil {
-		return trace.WrapWithMessage(err, "couldn't load leaf clusters")
-	}
-
-	for _, cluster := range clusters {
-		if cluster.GetMetadata().Name == a.leafCluster {
-			return nil
-		}
-	}
-
-	return trace.BadParameter("couldn't find leaf cluster named %q", a.leafCluster)
-
-}
-
-func (a *AuthCommand) checkKubeCluster(ctx context.Context, clusterAPI auth.ClientI) error {
-	if a.outputFormat != identityfile.FormatKubernetes && a.kubeCluster != "" {
-		// User set --kube-cluster-name but it's not actually used for the chosen --format.
-		// Print a warning but continue.
-		fmt.Printf("Note: --kube-cluster-name is only used with --format=%q, ignoring for --format=%q\n", identityfile.FormatKubernetes, a.outputFormat)
-	}
-	if a.outputFormat != identityfile.FormatKubernetes {
-		return nil
-	}
-
-	localCluster, err := clusterAPI.GetClusterName()
-	if err != nil {
-		return trace.Wrap(err)
-	}
-	if localCluster.GetClusterName() != a.leafCluster {
-		// Skip validation on remote clusters, since we don't know their
-		// registered kube clusters.
-		return nil
-	}
-
-	a.kubeCluster, err = kubeutils.CheckOrSetKubeCluster(ctx, clusterAPI, a.kubeCluster, a.leafCluster)
+	// check if such cluster already exists:
+	name := tc.GetName()
+	_, err = client.GetTrustedCluster(ctx, name)
 	if err != nil && !trace.IsNotFound(err) {
 		return trace.Wrap(err)
 	}
+
+	exists := (err == nil)
+	if !rc.force && exists {
+		return trace.AlreadyExists("trusted cluster %q already exists", name)
+	}
+
+	out, err := client.UpsertTrustedCluster(ctx, tc)
+	if err != nil {
+		// If force is used and UpsertTrustedCluster returns trace.AlreadyExists,
+		// this means the user tried to upsert a cluster whose exact match already
+		// exists in the backend, nothing needs to occur other than happy message
+		// that the trusted cluster has been created.
+		if rc.force && trace.IsAlreadyExists(err) {
+			out = tc
+		} else {
+			return trace.Wrap(err)
+		}
+	}
+	if out.GetName() != tc.GetName() {
+		fmt.Printf("WARNING: trusted cluster %q resource has been renamed to match remote cluster name %q\n", name, out.GetName())
+	}
+	fmt.Printf("trusted cluster %q has been %v\n", out.GetName(), UpsertVerb(exists, rc.force))
 	return nil
 }
 
-func (a *AuthCommand) checkProxyAddr(clusterAPI auth.ClientI) error {
-	if a.outputFormat != identityfile.FormatKubernetes && a.proxyAddr != "" {
-		// User set --proxy but it's not actually used for the chosen --format.
-		// Print a warning but continue.
-		fmt.Printf("Note: --proxy is only used with --format=%q, ignoring for --format=%q\n", identityfile.FormatKubernetes, a.outputFormat)
-		return nil
-	}
-	if a.outputFormat != identityfile.FormatKubernetes {
-		return nil
-	}
-	if a.proxyAddr != "" {
-		// User set --proxy. Validate it and set its scheme to https in case it was omitted.
-		u, err := url.Parse(a.proxyAddr)
-		if err != nil {
-			return trace.WrapWithMessage(err, "specified --proxy URL is invalid")
-		}
-		switch u.Scheme {
-		case "":
-			u.Scheme = "https"
-			a.proxyAddr = u.String()
-			return nil
-		case "http", "https":
-			return nil
-		default:
-			return trace.BadParameter("expected --proxy URL with http or https scheme")
-		}
-	}
-
-	// User didn't specify --proxy for kubeconfig. Let's try to guess it.
-	//
-	// Is the auth server also a proxy?
-	if a.config.Proxy.Kube.Enabled {
-		var err error
-		a.proxyAddr, err = a.config.Proxy.KubeAddr()
+// createCertAuthority creates certificate authority
+func (rc *ResourceCommand) createCertAuthority(client auth.ClientI, raw services.UnknownResource) error {
+	certAuthority, err := services.UnmarshalCertAuthority(raw.Raw)
+	if err != nil {
 		return trace.Wrap(err)
 	}
-	// Fetch proxies known to auth server and try to find a public address.
-	proxies, err := clusterAPI.GetProxies()
-	if err != nil {
-		return trace.WrapWithMessage(err, "couldn't load registered proxies, try setting --proxy manually")
+	if err := client.UpsertCertAuthority(certAuthority); err != nil {
+		return trace.Wrap(err)
 	}
-	for _, p := range proxies {
-		addr := p.GetPublicAddr()
-		if addr == "" {
-			continue
+	fmt.Printf("certificate authority '%s' has been updated\n", certAuthority.GetName())
+	return nil
+}
+
+// createGithubConnector creates a Github connector
+func (rc *ResourceCommand) createGithubConnector(client auth.ClientI, raw services.UnknownResource) error {
+	ctx := context.TODO()
+	connector, err := services.UnmarshalGithubConnector(raw.Raw)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	_, err = client.GetGithubConnector(ctx, connector.GetName(), false)
+	if err != nil && !trace.IsNotFound(err) {
+		return trace.Wrap(err)
+	}
+	exists := (err == nil)
+	if !rc.force && exists {
+		return trace.AlreadyExists("authentication connector %q already exists",
+			connector.GetName())
+	}
+	err = client.UpsertGithubConnector(ctx, connector)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	fmt.Printf("authentication connector %q has been %s\n",
+		connector.GetName(), UpsertVerb(exists, rc.force))
+	return nil
+}
+
+// createKeycloakConnector creates a OIDC connector
+func (rc *ResourceCommand) createKeycloakConnector(client auth.ClientI, raw services.UnknownResource) error {
+	ctx := context.TODO()
+	connector, err := services.UnmarshalOIDCConnector(raw.Raw)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	_, err = client.GetOIDCConnector(ctx, connector.GetName(), false)
+	if err != nil && !trace.IsNotFound(err) {
+		return trace.Wrap(err)
+	}
+	exists := (err == nil)
+	if !rc.force && exists {
+		return trace.AlreadyExists("authentication connector %q already exists",
+			connector.GetName())
+	}
+	err = client.UpsertOIDCConnector(ctx, connector)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	fmt.Printf("authentication connector %q has been %s\n",
+		connector.GetName(), UpsertVerb(exists, rc.force))
+	return nil
+}
+
+// createRole implements `tctl create role.yaml` command.
+func (rc *ResourceCommand) createRole(client auth.ClientI, raw services.UnknownResource) error {
+	ctx := context.TODO()
+	role, err := services.UnmarshalRole(raw.Raw)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	err = role.CheckAndSetDefaults()
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	if err := services.ValidateAccessPredicates(role); err != nil {
+		// check for syntax errors in predicates
+		return trace.Wrap(err)
+	}
+
+	roleName := role.GetName()
+	_, err = client.GetRole(ctx, roleName)
+	if err != nil && !trace.IsNotFound(err) {
+		return trace.Wrap(err)
+	}
+	roleExists := (err == nil)
+	if roleExists && !rc.IsForced() {
+		return trace.AlreadyExists("role '%s' already exists", roleName)
+	}
+	if err := client.UpsertRole(ctx, role); err != nil {
+		return trace.Wrap(err)
+	}
+	fmt.Printf("role '%s' has been %s\n", roleName, UpsertVerb(roleExists, rc.IsForced()))
+	return nil
+}
+
+// createUser implements `tctl create user.yaml` command.
+func (rc *ResourceCommand) createUser(client auth.ClientI, raw services.UnknownResource) error {
+	user, err := services.UnmarshalUser(raw.Raw)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	userName := user.GetName()
+	existingUser, err := client.GetUser(userName, false)
+	if err != nil && !trace.IsNotFound(err) {
+		return trace.Wrap(err)
+	}
+	exists := (err == nil)
+
+	if exists {
+		if !rc.force {
+			return trace.AlreadyExists("user %q already exists", userName)
 		}
-		uaddr, err := utils.ParseAddr(addr)
+
+		// Unmarshalling user sets createdBy to zero values which will overwrite existing data.
+		// This field should not be allowed to be overwritten.
+		user.SetCreatedBy(existingUser.GetCreatedBy())
+
+		if err := client.UpdateUser(context.TODO(), user); err != nil {
+			return trace.Wrap(err)
+		}
+		fmt.Printf("user %q has been updated\n", userName)
+
+	} else {
+		if err := client.CreateUser(context.TODO(), user); err != nil {
+			return trace.Wrap(err)
+		}
+		fmt.Printf("user %q has been created\n", userName)
+	}
+
+	return nil
+}
+
+// createAuthPreference implements `tctl create cap.yaml` command.
+func (rc *ResourceCommand) createAuthPreference(client auth.ClientI, raw services.UnknownResource) error {
+	ctx := context.TODO()
+	newAuthPref, err := services.UnmarshalAuthPreference(raw.Raw)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	storedAuthPref, err := client.GetAuthPreference(ctx)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	if err := checkCreateResourceWithOrigin(storedAuthPref, "cluster auth preference", rc.force, rc.confirm); err != nil {
+		return trace.Wrap(err)
+	}
+
+	if err := client.SetAuthPreference(ctx, newAuthPref); err != nil {
+		return trace.Wrap(err)
+	}
+	fmt.Printf("cluster auth preference has been updated\n")
+	return nil
+}
+
+// createClusterNetworkingConfig implements `tctl create netconfig.yaml` command.
+func (rc *ResourceCommand) createClusterNetworkingConfig(client auth.ClientI, raw services.UnknownResource) error {
+	ctx := context.TODO()
+
+	newNetConfig, err := services.UnmarshalClusterNetworkingConfig(raw.Raw)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	storedNetConfig, err := client.GetClusterNetworkingConfig(ctx)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	if err := checkCreateResourceWithOrigin(storedNetConfig, "cluster networking configuration", rc.force, rc.confirm); err != nil {
+		return trace.Wrap(err)
+	}
+
+	if err := client.SetClusterNetworkingConfig(ctx, newNetConfig); err != nil {
+		return trace.Wrap(err)
+	}
+	fmt.Printf("cluster networking configuration has been updated\n")
+	return nil
+}
+
+// createSessionRecordingConfig implements `tctl create recconfig.yaml` command.
+func (rc *ResourceCommand) createSessionRecordingConfig(client auth.ClientI, raw services.UnknownResource) error {
+	ctx := context.TODO()
+
+	newRecConfig, err := services.UnmarshalSessionRecordingConfig(raw.Raw)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	storedRecConfig, err := client.GetSessionRecordingConfig(ctx)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	if err := checkCreateResourceWithOrigin(storedRecConfig, "session recording configuration", rc.force, rc.confirm); err != nil {
+		return trace.Wrap(err)
+	}
+
+	if err := client.SetSessionRecordingConfig(ctx, newRecConfig); err != nil {
+		return trace.Wrap(err)
+	}
+	fmt.Printf("session recording configuration has been updated\n")
+	return nil
+}
+
+// createLock implements `tctl create lock.yaml` command.
+func (rc *ResourceCommand) createLock(client auth.ClientI, raw services.UnknownResource) error {
+	ctx := context.TODO()
+	lock, err := services.UnmarshalLock(raw.Raw)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	// Check if a lock of the name already exists.
+	name := lock.GetName()
+	_, err = client.GetLock(ctx, name)
+	if err != nil && !trace.IsNotFound(err) {
+		return trace.Wrap(err)
+	}
+
+	exists := (err == nil)
+	if !rc.force && exists {
+		return trace.AlreadyExists("lock %q already exists", name)
+	}
+
+	if err := client.UpsertLock(ctx, lock); err != nil {
+		return trace.Wrap(err)
+	}
+	fmt.Printf("lock %q has been %s\n", name, UpsertVerb(exists, rc.force))
+	return nil
+}
+
+// createNetworkRestrictions implements `tctl create net_restrict.yaml` command.
+func (rc *ResourceCommand) createNetworkRestrictions(client auth.ClientI, raw services.UnknownResource) error {
+	ctx := context.TODO()
+
+	newNetRestricts, err := services.UnmarshalNetworkRestrictions(raw.Raw)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	if err := client.SetNetworkRestrictions(ctx, newNetRestricts); err != nil {
+		return trace.Wrap(err)
+	}
+	fmt.Printf("network restrictions have been updated\n")
+	return nil
+}
+
+func (rc *ResourceCommand) createApp(client auth.ClientI, raw services.UnknownResource) error {
+	app, err := services.UnmarshalApp(raw.Raw)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	if err := client.CreateApp(context.Background(), app); err != nil {
+		if trace.IsAlreadyExists(err) {
+			if !rc.force {
+				return trace.AlreadyExists("application %q already exists", app.GetName())
+			}
+			if err := client.UpdateApp(context.Background(), app); err != nil {
+				return trace.Wrap(err)
+			}
+			fmt.Printf("application %q has been updated\n", app.GetName())
+			return nil
+		}
+		return trace.Wrap(err)
+	}
+	fmt.Printf("application %q has been created\n", app.GetName())
+	return nil
+}
+
+func (rc *ResourceCommand) createDatabase(client auth.ClientI, raw services.UnknownResource) error {
+	database, err := services.UnmarshalDatabase(raw.Raw)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+	if err := client.CreateDatabase(context.Background(), database); err != nil {
+		if trace.IsAlreadyExists(err) {
+			if !rc.force {
+				return trace.AlreadyExists("database %q already exists", database.GetName())
+			}
+			if err := client.UpdateDatabase(context.Background(), database); err != nil {
+				return trace.Wrap(err)
+			}
+			fmt.Printf("database %q has been updated\n", database.GetName())
+			return nil
+		}
+		return trace.Wrap(err)
+	}
+	fmt.Printf("database %q has been created\n", database.GetName())
+	return nil
+}
+
+func (rc *ResourceCommand) createToken(client auth.ClientI, raw services.UnknownResource) error {
+	token, err := services.UnmarshalProvisionToken(raw.Raw)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	err = client.UpsertToken(context.Background(), token)
+	return trace.Wrap(err)
+}
+
+// Delete deletes resource by name
+func (rc *ResourceCommand) Delete(client auth.ClientI) (err error) {
+	singletonResources := []string{
+		types.KindClusterAuthPreference,
+		types.KindClusterNetworkingConfig,
+		types.KindSessionRecordingConfig,
+	}
+	if !apiutils.SliceContainsStr(singletonResources, rc.ref.Kind) && (rc.ref.Kind == "" || rc.ref.Name == "") {
+		return trace.BadParameter("provide a full resource name to delete, for example:\n$ tctl rm cluster/east\n")
+	}
+
+	ctx := context.TODO()
+	switch rc.ref.Kind {
+	case types.KindNode:
+		if err = client.DeleteNode(ctx, apidefaults.Namespace, rc.ref.Name); err != nil {
+			return trace.Wrap(err)
+		}
+		fmt.Printf("node %v has been deleted\n", rc.ref.Name)
+	case types.KindUser:
+		if err = client.DeleteUser(ctx, rc.ref.Name); err != nil {
+			return trace.Wrap(err)
+		}
+		fmt.Printf("user %q has been deleted\n", rc.ref.Name)
+	case types.KindRole:
+		if err = client.DeleteRole(ctx, rc.ref.Name); err != nil {
+			return trace.Wrap(err)
+		}
+		fmt.Printf("role %q has been deleted\n", rc.ref.Name)
+	case types.KindToken:
+		if err = client.DeleteToken(ctx, rc.ref.Name); err != nil {
+			return trace.Wrap(err)
+		}
+		fmt.Printf("token %q has been deleted\n", rc.ref.Name)
+	case types.KindSAMLConnector:
+		if err = client.DeleteSAMLConnector(ctx, rc.ref.Name); err != nil {
+			return trace.Wrap(err)
+		}
+		fmt.Printf("SAML connector %v has been deleted\n", rc.ref.Name)
+	case types.KindOIDCConnector:
+		if err = client.DeleteOIDCConnector(ctx, rc.ref.Name); err != nil {
+			return trace.Wrap(err)
+		}
+		fmt.Printf("OIDC connector %v has been deleted\n", rc.ref.Name)
+	case types.KindGithubConnector:
+		if err = client.DeleteGithubConnector(ctx, rc.ref.Name); err != nil {
+			return trace.Wrap(err)
+		}
+		fmt.Printf("github connector %q has been deleted\n", rc.ref.Name)
+	case types.KindReverseTunnel:
+		if err := client.DeleteReverseTunnel(rc.ref.Name); err != nil {
+			return trace.Wrap(err)
+		}
+		fmt.Printf("reverse tunnel %v has been deleted\n", rc.ref.Name)
+	case types.KindTrustedCluster:
+		if err = client.DeleteTrustedCluster(ctx, rc.ref.Name); err != nil {
+			return trace.Wrap(err)
+		}
+		fmt.Printf("trusted cluster %q has been deleted\n", rc.ref.Name)
+	case types.KindRemoteCluster:
+		if err = client.DeleteRemoteCluster(rc.ref.Name); err != nil {
+			return trace.Wrap(err)
+		}
+		fmt.Printf("remote cluster %q has been deleted\n", rc.ref.Name)
+	case types.KindSemaphore:
+		if rc.ref.SubKind == "" || rc.ref.Name == "" {
+			return trace.BadParameter(
+				"full semaphore path must be specified (e.g. '%s/%s/alice@example.com')",
+				types.KindSemaphore, types.SemaphoreKindConnection,
+			)
+		}
+		err := client.DeleteSemaphore(ctx, types.SemaphoreFilter{
+			SemaphoreKind: rc.ref.SubKind,
+			SemaphoreName: rc.ref.Name,
+		})
 		if err != nil {
-			logrus.Warningf("Invalid public address on the proxy %q: %q: %v.", p.GetName(), addr, err)
-			continue
+			return trace.Wrap(err)
 		}
-		u := url.URL{
-			Scheme: "https",
-			Host:   net.JoinHostPort(uaddr.Host(), strconv.Itoa(defaults.KubeListenPort)),
+		fmt.Printf("semaphore '%s/%s' has been deleted\n", rc.ref.SubKind, rc.ref.Name)
+	case types.KindKubeService:
+		if err = client.DeleteKubeService(ctx, rc.ref.Name); err != nil {
+			return trace.Wrap(err)
 		}
-		a.proxyAddr = u.String()
-		return nil
+		fmt.Printf("kubernetes service %v has been deleted\n", rc.ref.Name)
+	case types.KindClusterAuthPreference:
+		if err = resetAuthPreference(ctx, client); err != nil {
+			return trace.Wrap(err)
+		}
+		fmt.Printf("cluster auth preference has been reset to defaults\n")
+	case types.KindClusterNetworkingConfig:
+		if err = resetClusterNetworkingConfig(ctx, client); err != nil {
+			return trace.Wrap(err)
+		}
+		fmt.Printf("cluster networking configuration has been reset to defaults\n")
+	case types.KindSessionRecordingConfig:
+		if err = resetSessionRecordingConfig(ctx, client); err != nil {
+			return trace.Wrap(err)
+		}
+		fmt.Printf("session recording configuration has been reset to defaults\n")
+	case types.KindLock:
+		name := rc.ref.Name
+		if rc.ref.SubKind != "" {
+			name = rc.ref.SubKind + "/" + name
+		}
+		if err = client.DeleteLock(ctx, name); err != nil {
+			return trace.Wrap(err)
+		}
+		fmt.Printf("lock %q has been deleted\n", name)
+	case types.KindDatabaseServer:
+		dbServers, err := client.GetDatabaseServers(ctx, apidefaults.Namespace)
+		if err != nil {
+			return trace.Wrap(err)
+		}
+		deleted := false
+		for _, server := range dbServers {
+			if server.GetName() == rc.ref.Name {
+				if err := client.DeleteDatabaseServer(ctx, apidefaults.Namespace, server.GetHostID(), server.GetName()); err != nil {
+					return trace.Wrap(err)
+				}
+				deleted = true
+			}
+		}
+		if !deleted {
+			return trace.NotFound("database server %q not found", rc.ref.Name)
+		}
+		fmt.Printf("database server %q has been deleted\n", rc.ref.Name)
+	case types.KindNetworkRestrictions:
+		if err = resetNetworkRestrictions(ctx, client); err != nil {
+			return trace.Wrap(err)
+		}
+		fmt.Printf("network restrictions have been reset to defaults (allow all)\n")
+	case types.KindApp:
+		if err = client.DeleteApp(ctx, rc.ref.Name); err != nil {
+			return trace.Wrap(err)
+		}
+		fmt.Printf("application %q has been deleted\n", rc.ref.Name)
+	case types.KindDatabase:
+		if err = client.DeleteDatabase(ctx, rc.ref.Name); err != nil {
+			return trace.Wrap(err)
+		}
+		fmt.Printf("database %q has been deleted\n", rc.ref.Name)
+	case types.KindWindowsDesktopService:
+		if err = client.DeleteWindowsDesktopService(ctx, rc.ref.Name); err != nil {
+			return trace.Wrap(err)
+		}
+		fmt.Printf("windows desktop service %q has been deleted\n", rc.ref.Name)
+	case types.KindWindowsDesktop:
+		desktops, err := client.GetWindowsDesktops(ctx,
+			types.WindowsDesktopFilter{Name: rc.ref.Name})
+		if err != nil {
+			return trace.Wrap(err)
+		}
+		if len(desktops) == 0 {
+			return trace.NotFound("no desktops with name %q were found", rc.ref.Name)
+		}
+		deleted := 0
+		var errs []error
+		for _, desktop := range desktops {
+			if desktop.GetName() != rc.ref.Name {
+				if err = client.DeleteWindowsDesktop(ctx, desktop.GetHostID(), rc.ref.Name); err != nil {
+					errs = append(errs, err)
+					continue
+				}
+				deleted++
+			}
+		}
+		if deleted == 0 {
+			errs = append(errs,
+				trace.Errorf("failed to delete any desktops with the name %q, %d were found",
+					rc.ref.Name, len(desktops)))
+		}
+		fmts := "%d windows desktops with name %q have been deleted"
+		if err := trace.NewAggregate(errs...); err != nil {
+			fmt.Printf(fmts+" with errors while deleting\n", deleted, rc.ref.Name)
+			return err
+		}
+		fmt.Printf(fmts+"\n", deleted, rc.ref.Name)
+	case types.KindCertAuthority:
+		if rc.ref.SubKind == "" || rc.ref.Name == "" {
+			return trace.BadParameter(
+				"full %s path must be specified (e.g. '%s/%s/clustername')",
+				types.KindCertAuthority, types.KindCertAuthority, types.HostCA,
+			)
+		}
+		err := client.DeleteCertAuthority(types.CertAuthID{
+			Type:       types.CertAuthType(rc.ref.SubKind),
+			DomainName: rc.ref.Name,
+		})
+		if err != nil {
+			return trace.Wrap(err)
+		}
+		fmt.Printf("%s '%s/%s' has been deleted\n", types.KindCertAuthority, rc.ref.SubKind, rc.ref.Name)
+	default:
+		return trace.BadParameter("deleting resources of type %q is not supported", rc.ref.Kind)
 	}
-
-	return trace.BadParameter("couldn't find registered public proxies, specify --proxy when using --format=%q", identityfile.FormatKubernetes)
+	return nil
 }
 
-// userCAFormat returns the certificate authority public key exported as a single
-// line that can be placed in ~/.ssh/authorized_keys file. The format adheres to the
-// man sshd (8) authorized_keys format, a space-separated list of: options, keytype,
-// base64-encoded key, comment.
-// For example:
-//
-//    cert-authority AAA... type=user&clustername=cluster-a
-//
-// URL encoding is used to pass the CA type and cluster name into the comment field.
-func userCAFormat(ca types.CertAuthority, keyBytes []byte) (string, error) {
-	return sshutils.MarshalAuthorizedKeysFormat(ca.GetClusterName(), keyBytes)
-}
-
-// hostCAFormat returns the certificate authority public key exported as a single line
-// that can be placed in ~/.ssh/authorized_hosts. The format adheres to the man sshd (8)
-// authorized_hosts format, a space-separated list of: marker, hosts, key, and comment.
-// For example:
-//
-//    @cert-authority *.cluster-a ssh-rsa AAA... type=host
-//
-// URL encoding is used to pass the CA type and allowed logins into the comment field.
-func hostCAFormat(ca types.CertAuthority, keyBytes []byte, client auth.ClientI) (string, error) {
-	roles, err := services.FetchRoles(ca.GetRoles(), client, nil)
+func resetAuthPreference(ctx context.Context, client auth.ClientI) error {
+	storedAuthPref, err := client.GetAuthPreference(ctx)
 	if err != nil {
-		return "", trace.Wrap(err)
+		return trace.Wrap(err)
 	}
-	allowedLogins, _ := roles.GetLoginsForTTL(defaults.MinCertDuration + time.Second)
-	return sshutils.MarshalAuthorizedHostsFormat(ca.GetClusterName(), keyBytes, allowedLogins)
+
+	managedByStaticConfig := storedAuthPref.Origin() == types.OriginConfigFile
+	if managedByStaticConfig {
+		return trace.BadParameter(managedByStaticDeleteMsg)
+	}
+
+	return trace.Wrap(client.ResetAuthPreference(ctx))
 }
 
-func getApplicationServer(ctx context.Context, clusterAPI auth.ClientI, appName string) (types.AppServer, error) {
-	servers, err := clusterAPI.GetApplicationServers(ctx, apidefaults.Namespace)
+func resetClusterNetworkingConfig(ctx context.Context, client auth.ClientI) error {
+	storedNetConfig, err := client.GetClusterNetworkingConfig(ctx)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	managedByStaticConfig := storedNetConfig.Origin() == types.OriginConfigFile
+	if managedByStaticConfig {
+		return trace.BadParameter(managedByStaticDeleteMsg)
+	}
+
+	return trace.Wrap(client.ResetClusterNetworkingConfig(ctx))
+}
+
+func resetSessionRecordingConfig(ctx context.Context, client auth.ClientI) error {
+	storedRecConfig, err := client.GetSessionRecordingConfig(ctx)
+	if err != nil {
+		return trace.Wrap(err)
+	}
+
+	managedByStaticConfig := storedRecConfig.Origin() == types.OriginConfigFile
+	if managedByStaticConfig {
+		return trace.BadParameter(managedByStaticDeleteMsg)
+	}
+
+	return trace.Wrap(client.ResetSessionRecordingConfig(ctx))
+}
+
+func resetNetworkRestrictions(ctx context.Context, client auth.ClientI) error {
+	return trace.Wrap(client.DeleteNetworkRestrictions(ctx))
+}
+
+// Update updates select resource fields: expiry and labels
+func (rc *ResourceCommand) Update(clt auth.ClientI) error {
+	if rc.ref.Kind == "" || rc.ref.Name == "" {
+		return trace.BadParameter("provide a full resource name to update, for example:\n$ tctl update rc/remote --set-labels=env=prod\n")
+	}
+
+	var err error
+	var labels map[string]string
+	if rc.labels != "" {
+		labels, err = client.ParseLabelSpec(rc.labels)
+		if err != nil {
+			return trace.Wrap(err)
+		}
+	}
+
+	var expiry time.Time
+	if rc.ttl != "" {
+		duration, err := time.ParseDuration(rc.ttl)
+		if err != nil {
+			return trace.Wrap(err)
+		}
+		expiry = time.Now().UTC().Add(duration)
+	}
+
+	if expiry.IsZero() && labels == nil {
+		return trace.BadParameter("use at least one of --set-labels or --set-ttl")
+	}
+
+	// TODO: pass the context from CLI to terminate requests on Ctrl-C
+	ctx := context.TODO()
+	switch rc.ref.Kind {
+	case types.KindRemoteCluster:
+		cluster, err := clt.GetRemoteCluster(rc.ref.Name)
+		if err != nil {
+			return trace.Wrap(err)
+		}
+		if labels != nil {
+			meta := cluster.GetMetadata()
+			meta.Labels = labels
+			cluster.SetMetadata(meta)
+		}
+		if !expiry.IsZero() {
+			cluster.SetExpiry(expiry)
+		}
+		if err = clt.UpdateRemoteCluster(ctx, cluster); err != nil {
+			return trace.Wrap(err)
+		}
+		fmt.Printf("cluster %v has been updated\n", rc.ref.Name)
+	default:
+		return trace.BadParameter("updating resources of type %q is not supported, supported are: %q", rc.ref.Kind, types.KindRemoteCluster)
+	}
+	return nil
+}
+
+// IsForced returns true if -f flag was passed
+func (rc *ResourceCommand) IsForced() bool {
+	return rc.force
+}
+
+// getCollection lists all resources of a given type
+func (rc *ResourceCommand) getCollection(client auth.ClientI) (ResourceCollection, error) {
+	if rc.ref.Kind == "" {
+		return nil, trace.BadParameter("specify resource to list, e.g. 'tctl get roles'")
+	}
+
+	// TODO: pass the context from CLI to terminate requests on Ctrl-C
+	ctx := context.TODO()
+	switch rc.ref.Kind {
+	case types.KindUser:
+		if rc.ref.Name == "" {
+			users, err := client.GetUsers(rc.withSecrets)
+			if err != nil {
+				return nil, trace.Wrap(err)
+			}
+			return &userCollection{users: users}, nil
+		}
+		user, err := client.GetUser(rc.ref.Name, rc.withSecrets)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		return &userCollection{users: services.Users{user}}, nil
+	case types.KindConnectors:
+		sc, scErr := getSAMLConnectors(ctx, client, rc.ref.Name, rc.withSecrets)
+		oc, ocErr := getOIDCConnectors(ctx, client, rc.ref.Name, rc.withSecrets)
+		gc, gcErr := getGithubConnectors(ctx, client, rc.ref.Name, rc.withSecrets)
+		errs := []error{scErr, ocErr, gcErr}
+		allEmpty := len(sc) == 0 && len(oc) == 0 && len(gc) == 0
+		reportErr := false
+		for _, err := range errs {
+			if err != nil && !trace.IsNotFound(err) {
+				reportErr = true
+				break
+			}
+		}
+		var finalErr error
+		if allEmpty || reportErr {
+			finalErr = trace.NewAggregate(errs...)
+		}
+		return &connectorsCollection{
+			saml:   sc,
+			oidc:   oc,
+			github: gc,
+		}, finalErr
+	case types.KindSAMLConnector:
+		connectors, err := getSAMLConnectors(ctx, client, rc.ref.Name, rc.withSecrets)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		return &samlCollection{connectors}, nil
+	case types.KindOIDCConnector:
+		connectors, err := getOIDCConnectors(ctx, client, rc.ref.Name, rc.withSecrets)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		return &oidcCollection{connectors}, nil
+	case types.KindGithubConnector:
+		connectors, err := getGithubConnectors(ctx, client, rc.ref.Name, rc.withSecrets)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		return &githubCollection{connectors}, nil
+	case types.KindReverseTunnel:
+		if rc.ref.Name == "" {
+			tunnels, err := client.GetReverseTunnels()
+			if err != nil {
+				return nil, trace.Wrap(err)
+			}
+			return &reverseTunnelCollection{tunnels: tunnels}, nil
+		}
+		tunnel, err := client.GetReverseTunnel(rc.ref.Name)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		return &reverseTunnelCollection{tunnels: []types.ReverseTunnel{tunnel}}, nil
+	case types.KindCertAuthority:
+		if rc.ref.SubKind == "" && rc.ref.Name == "" {
+			var allAuthorities []types.CertAuthority
+			for _, caType := range types.CertAuthTypes {
+				authorities, err := client.GetCertAuthorities(ctx, caType, rc.withSecrets)
+				if err != nil {
+					return nil, trace.Wrap(err)
+				}
+				allAuthorities = append(allAuthorities, authorities...)
+			}
+			return &authorityCollection{cas: allAuthorities}, nil
+		}
+		id := types.CertAuthID{Type: types.CertAuthType(rc.ref.SubKind), DomainName: rc.ref.Name}
+		authority, err := client.GetCertAuthority(ctx, id, rc.withSecrets)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		return &authorityCollection{cas: []types.CertAuthority{authority}}, nil
+	case types.KindNode:
+		nodes, err := client.GetNodes(ctx, rc.namespace)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		if rc.ref.Name == "" {
+			return &serverCollection{servers: nodes}, nil
+		}
+		for _, node := range nodes {
+			if node.GetName() == rc.ref.Name || node.GetHostname() == rc.ref.Name {
+				return &serverCollection{servers: []types.Server{node}}, nil
+			}
+		}
+		return nil, trace.NotFound("node with ID %q not found", rc.ref.Name)
+	case types.KindAuthServer:
+		servers, err := client.GetAuthServers()
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		if rc.ref.Name == "" {
+			return &serverCollection{servers: servers}, nil
+		}
+		for _, server := range servers {
+			if server.GetName() == rc.ref.Name || server.GetHostname() == rc.ref.Name {
+				return &serverCollection{servers: []types.Server{server}}, nil
+			}
+		}
+		return nil, trace.NotFound("auth server with ID %q not found", rc.ref.Name)
+	case types.KindProxy:
+		servers, err := client.GetProxies()
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		if rc.ref.Name == "" {
+			return &serverCollection{servers: servers}, nil
+		}
+		for _, server := range servers {
+			if server.GetName() == rc.ref.Name || server.GetHostname() == rc.ref.Name {
+				return &serverCollection{servers: []types.Server{server}}, nil
+			}
+		}
+		return nil, trace.NotFound("proxy with ID %q not found", rc.ref.Name)
+	case types.KindRole:
+		if rc.ref.Name == "" {
+			roles, err := client.GetRoles(ctx)
+			if err != nil {
+				return nil, trace.Wrap(err)
+			}
+			return &roleCollection{roles: roles, verbose: rc.verbose}, nil
+		}
+		role, err := client.GetRole(ctx, rc.ref.Name)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		return &roleCollection{roles: []types.Role{role}, verbose: rc.verbose}, nil
+	case types.KindNamespace:
+		if rc.ref.Name == "" {
+			namespaces, err := client.GetNamespaces()
+			if err != nil {
+				return nil, trace.Wrap(err)
+			}
+			return &namespaceCollection{namespaces: namespaces}, nil
+		}
+		ns, err := client.GetNamespace(rc.ref.Name)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		return &namespaceCollection{namespaces: []types.Namespace{*ns}}, nil
+	case types.KindTrustedCluster:
+		if rc.ref.Name == "" {
+			trustedClusters, err := client.GetTrustedClusters(ctx)
+			if err != nil {
+				return nil, trace.Wrap(err)
+			}
+			return &trustedClusterCollection{trustedClusters: trustedClusters}, nil
+		}
+		trustedCluster, err := client.GetTrustedCluster(ctx, rc.ref.Name)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		return &trustedClusterCollection{trustedClusters: []types.TrustedCluster{trustedCluster}}, nil
+	case types.KindRemoteCluster:
+		if rc.ref.Name == "" {
+			remoteClusters, err := client.GetRemoteClusters()
+			if err != nil {
+				return nil, trace.Wrap(err)
+			}
+			return &remoteClusterCollection{remoteClusters: remoteClusters}, nil
+		}
+		remoteCluster, err := client.GetRemoteCluster(rc.ref.Name)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		return &remoteClusterCollection{remoteClusters: []types.RemoteCluster{remoteCluster}}, nil
+	case types.KindSemaphore:
+		sems, err := client.GetSemaphores(ctx, types.SemaphoreFilter{
+			SemaphoreKind: rc.ref.SubKind,
+			SemaphoreName: rc.ref.Name,
+		})
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		return &semaphoreCollection{sems: sems}, nil
+	case types.KindKubeService:
+		servers, err := client.GetKubeServices(ctx)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		if rc.ref.Name == "" {
+			return &serverCollection{servers: servers}, nil
+		}
+		for _, server := range servers {
+			if server.GetName() == rc.ref.Name || server.GetHostname() == rc.ref.Name {
+				return &serverCollection{servers: []types.Server{server}}, nil
+			}
+		}
+		return nil, trace.NotFound("kube_service with ID %q not found", rc.ref.Name)
+	case types.KindClusterAuthPreference:
+		if rc.ref.Name != "" {
+			return nil, trace.BadParameter("only simple `tctl get %v` can be used", types.KindClusterAuthPreference)
+		}
+		authPref, err := client.GetAuthPreference(ctx)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		return &authPrefCollection{authPref}, nil
+	case types.KindClusterNetworkingConfig:
+		if rc.ref.Name != "" {
+			return nil, trace.BadParameter("only simple `tctl get %v` can be used", types.KindClusterNetworkingConfig)
+		}
+		netConfig, err := client.GetClusterNetworkingConfig(ctx)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		return &netConfigCollection{netConfig}, nil
+	case types.KindSessionRecordingConfig:
+		if rc.ref.Name != "" {
+			return nil, trace.BadParameter("only simple `tctl get %v` can be used", types.KindSessionRecordingConfig)
+		}
+		recConfig, err := client.GetSessionRecordingConfig(ctx)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		return &recConfigCollection{recConfig}, nil
+	case types.KindLock:
+		if rc.ref.Name == "" {
+			locks, err := client.GetLocks(ctx, false)
+			if err != nil {
+				return nil, trace.Wrap(err)
+			}
+			return &lockCollection{locks: locks}, nil
+		}
+		name := rc.ref.Name
+		if rc.ref.SubKind != "" {
+			name = rc.ref.SubKind + "/" + name
+		}
+		lock, err := client.GetLock(ctx, name)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		return &lockCollection{locks: []types.Lock{lock}}, nil
+	case types.KindDatabaseServer:
+		servers, err := client.GetDatabaseServers(ctx, rc.namespace)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		if rc.ref.Name == "" {
+			return &databaseServerCollection{servers: servers}, nil
+		}
+
+		var out []types.DatabaseServer
+		for _, server := range servers {
+			if server.GetName() == rc.ref.Name {
+				out = append(out, server)
+			}
+		}
+		if len(out) == 0 {
+			return nil, trace.NotFound("database server %q not found", rc.ref.Name)
+		}
+		return &databaseServerCollection{servers: out}, nil
+	case types.KindNetworkRestrictions:
+		nr, err := client.GetNetworkRestrictions(ctx)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		return &netRestrictionsCollection{nr}, nil
+	case types.KindApp:
+		if rc.ref.Name == "" {
+			apps, err := client.GetApps(ctx)
+			if err != nil {
+				return nil, trace.Wrap(err)
+			}
+			return &appCollection{apps: apps}, nil
+		}
+		app, err := client.GetApp(ctx, rc.ref.Name)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		return &appCollection{apps: []types.Application{app}}, nil
+	case types.KindDatabase:
+		if rc.ref.Name == "" {
+			databases, err := client.GetDatabases(ctx)
+			if err != nil {
+				return nil, trace.Wrap(err)
+			}
+			return &databaseCollection{databases: databases}, nil
+		}
+		database, err := client.GetDatabase(ctx, rc.ref.Name)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		return &databaseCollection{databases: []types.Database{database}}, nil
+	case types.KindWindowsDesktopService:
+		services, err := client.GetWindowsDesktopServices(ctx)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		if rc.ref.Name == "" {
+			return &windowsDesktopServiceCollection{services: services}, nil
+		}
+
+		var out []types.WindowsDesktopService
+		for _, service := range services {
+			if service.GetName() == rc.ref.Name {
+				out = append(out, service)
+			}
+		}
+		if len(out) == 0 {
+			return nil, trace.NotFound("Windows desktop service %q not found", rc.ref.Name)
+		}
+		return &windowsDesktopServiceCollection{services: out}, nil
+	case types.KindWindowsDesktop:
+		desktops, err := client.GetWindowsDesktops(ctx, types.WindowsDesktopFilter{})
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		if rc.ref.Name == "" {
+			return &windowsDesktopCollection{desktops: desktops}, nil
+		}
+
+		var out []types.WindowsDesktop
+		for _, desktop := range desktops {
+			if desktop.GetName() == rc.ref.Name {
+				out = append(out, desktop)
+			}
+		}
+		if len(out) == 0 {
+			return nil, trace.NotFound("Windows desktop %q not found", rc.ref.Name)
+		}
+		return &windowsDesktopCollection{desktops: out}, nil
+	case types.KindToken:
+		if rc.ref.Name == "" {
+			tokens, err := client.GetTokens(ctx)
+			if err != nil {
+				return nil, trace.Wrap(err)
+			}
+			return &tokenCollection{tokens: tokens}, nil
+		}
+		token, err := client.GetToken(ctx, rc.ref.Name)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		return &tokenCollection{tokens: []types.ProvisionToken{token}}, nil
+	}
+	return nil, trace.BadParameter("getting %q is not supported", rc.ref.String())
+}
+
+func getSAMLConnectors(ctx context.Context, client auth.ClientI, name string, withSecrets bool) ([]types.SAMLConnector, error) {
+	if name == "" {
+		connectors, err := client.GetSAMLConnectors(ctx, withSecrets)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		return connectors, nil
+	}
+	connector, err := client.GetSAMLConnector(ctx, name, withSecrets)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-
-	for _, s := range servers {
-		if s.GetName() == appName {
-			return s, nil
-		}
-	}
-	return nil, trace.NotFound("app %q not found", appName)
+	return []types.SAMLConnector{connector}, nil
 }
 
-// getDatabaseServer fetches a single `DatabaseServer` by name using the
-// provided `auth.ClientI`.
-func getDatabaseServer(ctx context.Context, clientAPI auth.ClientI, dbName string) (types.DatabaseServer, error) {
-	servers, err := clientAPI.GetDatabaseServers(ctx, apidefaults.Namespace)
+func getOIDCConnectors(ctx context.Context, client auth.ClientI, name string, withSecrets bool) ([]types.OIDCConnector, error) {
+	if name == "" {
+		connectors, err := client.GetOIDCConnectors(ctx, withSecrets)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		return connectors, nil
+	}
+	connector, err := client.GetOIDCConnector(ctx, name, withSecrets)
 	if err != nil {
 		return nil, trace.Wrap(err)
 	}
-
-	for _, server := range servers {
-		if server.GetName() == dbName {
-			return server, nil
-		}
-	}
-
-	return nil, trace.NotFound("database %q not found", dbName)
+	return []types.OIDCConnector{connector}, nil
 }
+
+func getGithubConnectors(ctx context.Context, client auth.ClientI, name string, withSecrets bool) ([]types.GithubConnector, error) {
+	if name == "" {
+		connectors, err := client.GetGithubConnectors(ctx, withSecrets)
+		if err != nil {
+			return nil, trace.Wrap(err)
+		}
+		return connectors, nil
+	}
+	connector, err := client.GetGithubConnector(ctx, name, withSecrets)
+	if err != nil {
+		return nil, trace.Wrap(err)
+	}
+	return []types.GithubConnector{connector}, nil
+}
+
+// UpsertVerb generates the correct string form of a verb based on the action taken
+func UpsertVerb(exists bool, force bool) string {
+	switch {
+	case exists == true && force == true:
+		return "created"
+	case exists == false && force == true:
+		return "created"
+	case exists == true && force == false:
+		return "updated"
+	case exists == false && force == false:
+		return "created"
+	default:
+		// Unreachable, but compiler requires this.
+		return "unknown"
+	}
+}
+
+func checkCreateResourceWithOrigin(storedRes types.ResourceWithOrigin, resDesc string, force, confirm bool) error {
+	if exists := (storedRes.Origin() != types.OriginDefaults); exists && !force {
+		return trace.AlreadyExists("non-default %s already exists", resDesc)
+	}
+	if managedByStatic := (storedRes.Origin() == types.OriginConfigFile); managedByStatic && !confirm {
+		return trace.BadParameter(`The %s resource is managed by static configuration. We recommend removing configuration from teleport.yaml, restarting the servers and trying this command again.
+
+If you would still like to proceed, re-run the command with both --force and --confirm flags.`, resDesc)
+	}
+	return nil
+}
+
+const managedByStaticDeleteMsg = `This resource is managed by static configuration. In order to reset it to defaults, remove relevant configuration from teleport.yaml and restart the servers.`

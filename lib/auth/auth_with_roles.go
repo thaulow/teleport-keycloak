@@ -2226,9 +2226,9 @@ func (a *ServerWithRoles) UpsertOIDCConnector(ctx context.Context, connector typ
 	if err := a.authConnectorAction(apidefaults.Namespace, types.KindOIDC, types.VerbUpdate); err != nil {
 		return trace.Wrap(err)
 	}
-	if modules.GetModules().Features().OIDC == false {
-		return trace.AccessDenied("OIDC is only available in enterprise subscriptions")
-	}
+	// if modules.GetModules().Features().OIDC == false {
+	//	return trace.AccessDenied("OIDC is only available in enterprise subscriptions")
+	// }
 
 	return a.authServer.UpsertOIDCConnector(ctx, connector)
 }
